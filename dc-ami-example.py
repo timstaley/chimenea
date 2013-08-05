@@ -21,12 +21,14 @@ ami_clean_args = {   "spw": '0:3~7',
           "cell": ['5.0arcsec'],
           "pbcor": False,
 #           "weighting": 'natural',
-#             "weighting": 'briggs',
-#             "robust": 0.5,
-          "weighting":'uniform',
+             "weighting": 'briggs',
+             "robust": 0.5,
+#          "weighting":'uniform',
           "psfmode": 'clark',
           "imagermode": 'csclean',
           }
+
+
 
 
 def handle_args():
@@ -64,6 +66,10 @@ def main(options, listings_file):
     for grp_name in sorted(groups.keys()):
         casa_output_dir = os.path.join(options.output_dir, grp_name, 'casa')
         fits_output_dir = os.path.join(options.output_dir, grp_name, 'images')
+        casa_logfile = os.path.join(casa_output_dir, 'casalog.txt')
+
+        print "Processing", grp_name, ", logfile at: ", casa_logfile
+
         files_info = groups[grp_name]
         grp_dir = os.path.join(os.path.expanduser(options.output_dir),
                                str(grp_name))
@@ -98,7 +104,7 @@ def main(options, listings_file):
 
 
         # Do a dirty clean to get a first, rough estimate of the noise level.
-        dirty_maps = drivecasa.commands.clean(script, vis_path=concat_vis,
+        concat_dirty_maps = drivecasa.commands.clean(script, vis_path=concat_vis,
                           niter=0, threshold_in_jy=1,
                           other_clean_args=ami_clean_args,
                           out_dir=casa_output_dir,
@@ -106,66 +112,46 @@ def main(options, listings_file):
 
         # Dump a FITS version of the dirty map
         dirty_fits = drivecasa.commands.export_fits(script,
-                                image_path=dirty_maps[clean_keys.image],
+                                image_path=concat_dirty_maps[clean_keys.image],
                                 out_dir=fits_output_dir,
                                 overwrite=False)
 
         # Ok, run what we have so far:
         stderr, errors = drivecasa.run_script(script, working_dir=casa_output_dir,
                                              log2term=True,
-                                             raise_on_severe=False)
+                                             raise_on_severe=False,
+                                             casa_logfile=casa_logfile)
         print "Got the following errors (probably all ok)"
         for e in errors:
             print e
 
-        init_rms_est = get_image_rms_estimate(dirty_maps[clean_keys.image])
+        open_clean_mapset, open_clean_fits, cleaned_rms_est = do_iterative_open_clean(
+                              vis_path=concat_vis, dirty_maps=concat_dirty_maps,
+                                casa_output_dir=casa_output_dir,
+                                fits_output_dir=fits_output_dir,
+                                casa_logfile=casa_logfile)
 
-        # Iteratively run open box cleaning until RMS levels out:
-        # NB we only clean to 3*RMS which should prevent extended iteration
-        # Also we do not overwrite after the initial run, hence taking advantage
-        # of casapy iterative cleaning.
-        # (See the casapy manual or the commands.clean docstring for details).
-        prev_rms_est = init_rms_est
-        print "Init RMS:", init_rms_est
-        clean_count = 0
-        while True:
-            script = []
-            if clean_count is 0:
-                overwrite = True
-            else:
-                overwrite = False
-            open_clean_maps = drivecasa.commands.clean(script, vis_path=concat_vis,
-                                   niter=500,
-                                   threshold_in_jy=init_rms_est * 3,
-                                   mask='',
-                                   other_clean_args=ami_clean_args,
-                                   out_dir=os.path.join(casa_output_dir,
-                                                'open_clean'),
-                                   overwrite=overwrite)
-            stderr, errors = drivecasa.run_script(script, working_dir=casa_output_dir,
-                                     log2term=True,
-                                     raise_on_severe=True)
-
-            cleaned_rms_est = get_image_rms_estimate(open_clean_maps[clean_keys.image])
-            clean_count += 1
-
-            print "Iter", clean_count, "; Cleaned RMS:", cleaned_rms_est
-            if cleaned_rms_est <= prev_rms_est * 1.25:
-                print "Stopping after ", clean_count, "open cleans."
-                break
-            else:
-                prev_rms_est = cleaned_rms_est
+        # Perform sourcefinding, determine mask:
+        mask = generate_mask(open_clean_fits, sig_threshold=5.5)
+        print "Generated a mask:"
+        print mask
 
         script = []
-        open_clean_fits = drivecasa.commands.export_fits(script,
-                                     image_path=open_clean_maps[clean_keys.image],
-                                     out_dir=fits_output_dir)
+        masked_clean_mapset = drivecasa.commands.clean(script, vis_path=concat_vis,
+                          niter=500, threshold_in_jy=cleaned_rms_est * 2.5,
+                          mask=mask,
+                          other_clean_args=ami_clean_args,
+                          out_dir=os.path.join(casa_output_dir,
+                                            'masked_clean'),
+                          overwrite=True)
+        masked_clean_fits = drivecasa.commands.export_fits(script,
+                                image_path=masked_clean_mapset[clean_keys.image],
+                                out_path=os.path.join(fits_output_dir, 'concat_masked_clean.fits'),
+                                overwrite=True)
         stderr, errors = drivecasa.run_script(script, working_dir=casa_output_dir,
-                                             log2term=True)
-
-
-        # Perform sourcefinding:
-
+                                           log2term=True,
+                                           raise_on_severe=False,
+                                           casa_logfile=casa_logfile)
 
 #             for f in files_info:
 #                 try:
@@ -202,13 +188,66 @@ def get_image_rms_estimate(path_to_casa_image):
     map = amisurvey.load_casa_imagedata(path_to_casa_image)
     return amisurvey.sigmaclip.rms_with_clipped_subregion(map, sigma=3, f=3)
 
-def find_significant_source_positions(path_to_fits_image,
-                                      detection_thresh=6,
-                                      analysis_thresh=4,
-                                      back_size=64,
-                                      margin=128,
-                                      radius=0,
-                                      ):
+def do_iterative_open_clean(vis_path, dirty_maps,
+                            casa_output_dir, fits_output_dir,
+                            casa_logfile):
+    init_rms_est = get_image_rms_estimate(dirty_maps[clean_keys.image])
+
+    # Iteratively run open box cleaning until RMS levels out:
+    # NB we only clean to 3*RMS which should prevent extended iteration
+    # Also we do not overwrite after the initial run, hence taking advantage
+    # of casapy iterative cleaning.
+    # (See the casapy manual or the commands.clean docstring for details).
+    prev_rms_est = init_rms_est
+    print "Init RMS:", init_rms_est
+    clean_count = 0
+    while True:
+        script = []
+        if clean_count is 0:
+            overwrite = True
+        else:
+            overwrite = False
+        open_clean_mapset = drivecasa.commands.clean(script, vis_path,
+                               niter=500,
+                               threshold_in_jy=init_rms_est * 3,
+                               mask='',
+                               other_clean_args=ami_clean_args,
+                               out_dir=os.path.join(casa_output_dir,
+                                            'open_clean'),
+                               overwrite=overwrite)
+        stderr, errors = drivecasa.run_script(script, working_dir=casa_output_dir,
+                                 log2term=True,
+                                 raise_on_severe=True,
+                                 casa_logfile=casa_logfile)
+
+        cleaned_rms_est = get_image_rms_estimate(open_clean_mapset[clean_keys.image])
+        clean_count += 1
+
+        print "Iter", clean_count, "; Cleaned RMS:", cleaned_rms_est
+        if cleaned_rms_est <= prev_rms_est * 1.25:
+            print "Stopping after ", clean_count, "open cleans."
+            break
+        else:
+            prev_rms_est = cleaned_rms_est
+
+    script = []
+    open_clean_fits = drivecasa.commands.export_fits(script,
+                         image_path=open_clean_mapset[clean_keys.image],
+                         out_path=os.path.join(fits_output_dir, 'concat_open_clean.fits'),
+                         overwrite=True)
+    stderr, errors = drivecasa.run_script(script, working_dir=casa_output_dir,
+                                         log2term=True, raise_on_severe=False,
+                                         casa_logfile=casa_logfile)
+    return open_clean_mapset, open_clean_fits, cleaned_rms_est
+
+
+def run_sourcefinder(path_to_fits_image,
+                      detection_thresh=6,
+                      analysis_thresh=4,
+                      back_size=64,
+                      margin=128,
+                      radius=0,
+                      ):
     sf_config = {
         "back_sizex": back_size,
         "back_sizey": back_size,
@@ -222,9 +261,15 @@ def find_significant_source_positions(path_to_fits_image,
     sfimg = sourcefinder_image_from_accessor(FitsImage(path_to_fits_image),
                                              **sf_config)
     results = sfimg.extract(detection_thresh, analysis_thresh)
-    for i, r in enumerate(results):
-        print i, ":", r,
-        print "Sig:", r.sig
+    return results
+
+def generate_mask(path_to_fits_image, sig_threshold, mask_aperture_radius=5):
+    sources = run_sourcefinder(path_to_fits_image)
+    sources = [s for s in sources if s.sig > sig_threshold]
+    source_pixel_coords = [ (s.x.value, s.y.value) for s in sources]
+    mask = drivecasa.utils.get_circular_mask_string(source_pixel_coords,
+                                             aperture_radius_pix=5)
+    return mask
 
 
 def output_preamble_to_log(groups):
