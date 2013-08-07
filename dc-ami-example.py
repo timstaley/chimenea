@@ -63,13 +63,16 @@ def main(options, listings_file):
     obs_groups = get_grouped_file_listings(all_obs)
     output_preamble_to_log(obs_groups)
 
-
     for grp_name in sorted(obs_groups.keys()):
         casa_output_dir = os.path.join(options.output_dir, grp_name, 'casa')
         fits_output_dir = os.path.join(options.output_dir, grp_name, 'images')
         casa_logfile = os.path.join(casa_output_dir, 'casalog.txt')
 
-        print "Processing", grp_name, ", logfile at: ", casa_logfile
+        casa = drivecasa.Casapy(working_dir=casa_output_dir,
+                                casa_logfile=casa_logfile)
+
+        logger.info(' '.join(("Processing", grp_name,
+                             ", logfile at: ", casa_logfile)))
 
         grp_obs = obs_groups[grp_name]
         grp_dir = os.path.join(os.path.expanduser(options.output_dir),
@@ -84,13 +87,10 @@ def main(options, listings_file):
             script.extend(make_dirty_map(obs, casa_output_dir, fits_output_dir))
 
 #         Ok, run what we have so far:
-        stderr, errors = drivecasa.run_script(script, working_dir=casa_output_dir,
-                                             log2term=True,
-                                             raise_on_severe=False,
-                                             casa_logfile=casa_logfile)
-        print "Got the following errors (probably all ok)"
+        casa_out, errors = casa.run_script(script, raise_on_severe=False)
+        logger.debug("Got the following errors (probably all ok)")
         for e in errors:
-            print e
+            logger.debug(e)
         # Now we can grab an estimate of the RMS for each map:
 
         concat_obs[obs_keys.dirty_rms_est] = get_image_rms_estimate(
@@ -102,10 +102,7 @@ def main(options, listings_file):
         # Ok, let's do an open clean on the concat map, to try and create a
         # deep source catalogue:
         script = make_open_clean_map(concat_obs, casa_output_dir, fits_output_dir)
-        stderr, errors = drivecasa.run_script(script, working_dir=casa_output_dir,
-                                             log2term=False,
-                                             raise_on_severe=False,
-                                             casa_logfile=casa_logfile)
+        casa_out, errors = casa.run_script(script, raise_on_severe=False)
 
 
         # Perform sourcefinding, determine mask:
@@ -124,11 +121,7 @@ def main(options, listings_file):
               make_masked_clean_map(obs, mask, casa_output_dir, fits_output_dir))
 
         # Go!
-        stderr, errors = drivecasa.run_script(script,
-                                              working_dir=casa_output_dir,
-                                           log2term=False,
-                                           raise_on_severe=False,
-                                           casa_logfile=casa_logfile)
+        casa_out, errors = casa.run_script(script, raise_on_severe=False)
     return obs_groups
 
 def load_listings(listings_path):
