@@ -8,7 +8,7 @@ import itertools
 import subprocess
 import drivecasa
 from drivecasa.keys import clean_results as clean_keys
-from ami import keys as ami_keys
+from driveami import keys as ami_keys
 import amisurvey
 from amisurvey.keys import obs_info as obs_keys
 
@@ -266,65 +266,6 @@ def make_masked_clean_map(obs_info, mask, casa_output_dir, fits_output_dir):
 def get_image_rms_estimate(path_to_casa_image):
     map = amisurvey.load_casa_imagedata(path_to_casa_image)
     return amisurvey.sigmaclip.rms_with_clipped_subregion(map, sigma=3, f=3)
-
-# def do_iterative_open_clean(obs_info,
-#                             casa_output_dir, fits_output_dir,
-#                             casa_logfile):
-#     init_rms_est = get_image_rms_estimate(
-#                               obs_info[obs_keys.dirty_maps][clean_keys.image])
-#
-#     # Iteratively run open box cleaning until RMS levels out:
-#     # NB we only clean to 3*RMS which should prevent extended iteration
-#     # Also we do not overwrite after the initial run, hence taking advantage
-#     # of casapy iterative cleaning.
-#     # (See the casapy manual or the commands.clean docstring for details).
-#     prev_rms_est = init_rms_est
-#     print "Init RMS:", init_rms_est
-#     clean_count = 0
-#     while True:
-#         script = []
-#         if clean_count is 0:
-#             overwrite = True
-#         else:
-#             overwrite = False
-#         open_clean_mapset = drivecasa.commands.clean(script,
-#                                obs_info[obs_keys.vis] ,
-#                                niter=500,
-#                                threshold_in_jy=init_rms_est * 3,
-#                                mask='',
-#                                other_clean_args=ami_clean_args,
-#                                out_dir=os.path.join(casa_output_dir,
-#                                                     'open_clean'),
-#                                overwrite=overwrite)
-#
-#         stderr, errors = drivecasa.run_script(script, working_dir=casa_output_dir,
-#                                  log2term=True,
-#                                  raise_on_severe=True,
-#                                  casa_logfile=casa_logfile)
-#
-#         cleaned_rms_est = get_image_rms_estimate(open_clean_mapset[clean_keys.image])
-#         clean_count += 1
-#
-#         print "Iter", clean_count, "; Cleaned RMS:", cleaned_rms_est
-#         if cleaned_rms_est <= prev_rms_est * 1.25:
-#             print "Stopping after ", clean_count, "open cleans."
-#             break
-#         else:
-#             prev_rms_est = cleaned_rms_est
-#
-#     obs_info[obs_keys.open_clean_maps] = open_clean_mapset
-#     obs_info[obs_keys.rms_est] = cleaned_rms_est
-#     script = []
-#     open_clean_fits = drivecasa.commands.export_fits(script,
-#                          image_path=open_clean_mapset[clean_keys.image],
-#                          out_path=os.path.join(fits_output_dir, 'concat_open_clean.fits'),
-#                          overwrite=True)
-#     obs_info[obs_keys.open_clean_fits] = open_clean_fits
-#     stderr, errors = drivecasa.run_script(script, working_dir=casa_output_dir,
-#                                          log2term=True, raise_on_severe=False,
-#                                          casa_logfile=casa_logfile)
-#     return
-
 
 def run_sourcefinder(path_to_fits_image,
                       detection_thresh=6,
