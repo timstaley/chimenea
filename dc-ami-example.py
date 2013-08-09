@@ -108,6 +108,7 @@ def main(options, listings_file):
         # Perform sourcefinding, determine mask:
         mask = generate_mask(concat_obs[obs_keys.open_clean_fits],
                              sig_threshold=5.5)
+        logger.info("Mask:" + mask)
 
         # Now go and do masked and open cleans for everything:
         script = []
@@ -205,6 +206,7 @@ def clean_and_export_fits(obs_info, maps_out_dir, fits_output_dir,
                                     vis_path=obs_info[obs_keys.vis],
                                     niter=niter,
                                     threshold_in_jy=threshold,
+                                    mask=mask,
                                     other_clean_args=ami_clean_args,
                                     out_dir=maps_out_dir,
                                     overwrite=False)
