@@ -122,7 +122,7 @@ def main(options, listings_file):
                        for s in masked_sources]
         mask = drivecasa.utils.get_circular_mask_string(mask_coords,
                                              aperture_radius="5pix")
-        logger.info("Mask:" + mask)
+        logger.info("Mask:\n" + mask)
 
         # Now go and do masked and open cleans for everything:
         script = []
