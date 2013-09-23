@@ -6,6 +6,9 @@ import logging
 import simplejson as json
 import itertools
 import subprocess
+from StringIO import StringIO
+import math
+
 import drivecasa
 from drivecasa.keys import clean_results as clean_keys
 from driveami import keys as ami_keys
@@ -16,6 +19,7 @@ from tkp.accessors import FitsImage
 from tkp.accessors import sourcefinder_image_from_accessor
 from tkp.accessors import writefits as tkp_writefits
 from tkp.sourcefinder.utils import generate_result_maps
+import tkp.bin.pyse
 
 ami_clean_args = {   "spw": '0:3~7',
           "imsize": [512, 512],
@@ -106,8 +110,18 @@ def main(options, listings_file):
 
 
         # Perform sourcefinding, determine mask:
-        mask = generate_mask(concat_obs[obs_keys.open_clean_fits],
-                             sig_threshold=5.5)
+        sources = run_sourcefinder(concat_obs[obs_keys.open_clean_fits])
+        write_ds9_regionfile(sources,
+                             os.path.join(fits_output_dir, 'all_sources.reg'))
+        mask_thresh = 5.5
+        masked_sources = [s for s in sources if s.sig > mask_thresh]
+        write_ds9_regionfile(masked_sources,
+                             os.path.join(fits_output_dir, 'mask_sources.reg'))
+
+        mask_coords = [(str(s.ra.value) + 'deg', str(s.dec.value) + 'deg')
+                       for s in masked_sources]
+        mask = drivecasa.utils.get_circular_mask_string(mask_coords,
+                                             aperture_radius="5pix")
         logger.info("Mask:" + mask)
 
         # Now go and do masked and open cleans for everything:
@@ -176,7 +190,7 @@ def import_and_concatenate(obs_list, casa_output_dir):
         obs[obs_keys.vis ] = drivecasa.commands.import_uvfits(script,
                                              obs[obs_keys.uvfits],
                                              out_dir=casa_output_dir,
-                                             overwrite=False)
+                                             overwrite=True)
 
 
     # Concatenate the data to create a master image:
@@ -187,7 +201,7 @@ def import_and_concatenate(obs_list, casa_output_dir):
                                      [obs[obs_keys.vis] for obs in obs_list],
                                      out_basename=concat_obs[obs_keys.name],
                                      out_dir=casa_output_dir,
-                                     overwrite=False)
+                                     overwrite=True)
     return script, concat_obs
 
 
@@ -209,7 +223,7 @@ def clean_and_export_fits(obs_info, maps_out_dir, fits_output_dir,
                                     mask=mask,
                                     other_clean_args=ami_clean_args,
                                     out_dir=maps_out_dir,
-                                    overwrite=False)
+                                    overwrite=True)
     obs_info[obs_keys.open_clean_maps] = maps
     # Dump a FITS version of the dirty map
     if fits_basename is None:
@@ -220,7 +234,7 @@ def clean_and_export_fits(obs_info, maps_out_dir, fits_output_dir,
                                         image_path=maps[clean_keys.image],
                                         out_dir=fits_output_dir,
                                         out_path=fits_outpath,
-                                        overwrite=False)
+                                        overwrite=True)
     return script, maps, fits
 
 def make_dirty_map(obs_info, casa_output_dir, fits_output_dir):
@@ -270,8 +284,8 @@ def get_image_rms_estimate(path_to_casa_image):
     return amisurvey.sigmaclip.rms_with_clipped_subregion(map, sigma=3, f=3)
 
 def run_sourcefinder(path_to_fits_image,
-                      detection_thresh=6,
-                      analysis_thresh=4,
+                      detection_thresh=5,
+                      analysis_thresh=3,
                       back_size=64,
                       margin=128,
                       radius=0,
@@ -291,13 +305,29 @@ def run_sourcefinder(path_to_fits_image,
     results = sfimg.extract(detection_thresh, analysis_thresh)
     return results
 
-def generate_mask(path_to_fits_image, sig_threshold, mask_aperture_radius=5):
-    sources = run_sourcefinder(path_to_fits_image)
-    sources = [s for s in sources if s.sig > sig_threshold]
-    source_pixel_coords = [ (s.x.value, s.y.value) for s in sources]
-    mask = drivecasa.utils.get_circular_mask_string(source_pixel_coords,
-                                             aperture_radius_pix=5)
-    return mask
+def fk5_regions(sourcelist):
+    """
+    Return a string containing a DS9-compatible region file describing all the
+    sources in sourcelist.
+    """
+    output = StringIO()
+    print >> output, "# Region file format: DS9 version 4.1"
+    print >> output, "global color=green dashlist=8 3 width=1 font=\"helvetica 10 normal\" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1"
+    print >> output, "fk5"
+    for source in sourcelist:
+        # NB, here we convert from internal 0-origin indexing to DS9 1-origin indexing
+        print >> output, "ellipse(%f, %f, %f, %f, %f)" % (
+            source.ra.value,
+            source.dec.value,
+            source.smaj_asec.value * 2 / 3600.,
+            source.smin_asec.value * 2 / 3600.,
+            math.degrees(source.theta) + 90
+        )
+    return output.getvalue()
+
+def write_ds9_regionfile(sources, out_path):
+    with open(out_path, 'w') as regionfile:
+        regionfile.write(fk5_regions(sources))
 
 
 def output_preamble_to_log(groups):
@@ -305,8 +335,17 @@ def output_preamble_to_log(groups):
     logger.info("Processing groups:")
     for key in sorted(groups.keys()):
         logger.info("%s:", key)
+
+        pointings = [f[obs_keys.metadata][ami_keys.pointing_fk5]
+                        for f in groups[key] ]
+        pointings = set((i[0], i[1]) for i in pointings)
+        print "\t ", len(pointings), "different pointings:",
+        print pointings
+        print
         for f in groups[key]:
-            logger.info("\t %s", f[obs_keys.name])
+            pointing = f[obs_keys.metadata][ami_keys.pointing_fk5]
+            ra, dec = pointing[0], pointing[1]
+            logger.info("\t %s, \t (%.4f,%.4f)", f[obs_keys.name], ra, dec),
         logger.info("--------------------------------")
     logger.info("*************************")
 
