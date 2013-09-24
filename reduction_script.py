@@ -14,6 +14,7 @@ from drivecasa.keys import clean_results as clean_keys
 from driveami import keys as ami_keys
 import amisurvey
 from amisurvey.keys import obs_info as obs_keys
+from collections import namedtuple
 
 from tkp.accessors import FitsImage
 from tkp.accessors import sourcefinder_image_from_accessor
@@ -52,6 +53,12 @@ def handle_args():
     parser.add_option("--casa-dir", default=default_casa_dir,
                    help="Path to CASA directory, default: " +
                                 str(default_casa_dir))
+    m_help = 'Specify a list of RA,DEC co-ordinate pairs to monitor (decimal' \
+         ' degrees, no spaces)'
+    parser.add_option('-m', '--monitor-coords', help=m_help, default=None)
+    parser.add_option('-l', '--monitor-list',
+                            help='Specify a file containing a list of RA,DEC',
+                            default=None)
 
     options, args = parser.parse_args()
     options.output_dir = os.path.expanduser(options.output_dir)
@@ -61,11 +68,41 @@ def handle_args():
     print "Reducing files listed in:", args[0]
     return options, args[0]
 
+def parse_monitoringlist_positions(opts):
+    """Loads a list of monitoringlist (RA,Dec) tuples from cmd line opts object.
+
+    Processes the flags "--monitor-coords" and "--monitor-list"
+    NB This is just a dumb function that does not care about units,
+    those should be matched against whatever uses the resulting values...
+    """
+    monitor_coords = []
+    if opts.monitor_coords:
+        try:
+            monitor_coords.extend(json.loads(opts.monitor_coords))
+        except ValueError:
+            logging.error("Could not parse monitor-coords from command line:"
+                         "string passed was:\n%s", opts.monitor_coords
+                         )
+            raise
+    if opts.monitor_list:
+        try:
+            mon_list = json.load(open(opts.monitor_list))
+            monitor_coords.extend(mon_list)
+        except ValueError:
+            logging.error("Could not parse monitor-coords from file: "
+                              + opts.monitor_list)
+            raise
+    return monitor_coords
+
 def main(options, listings_file):
     print "Processing all_obs in:", listings_file
     all_obs = load_listings(listings_file)
     obs_groups = get_grouped_file_listings(all_obs)
     output_preamble_to_log(obs_groups)
+
+    monitor_coords = parse_monitoringlist_positions(options)
+    print "Monitoring coords:"
+    print monitor_coords
 
     for grp_name in sorted(obs_groups.keys()):
         casa_output_dir = os.path.join(options.output_dir, grp_name, 'casa')
@@ -111,17 +148,39 @@ def main(options, listings_file):
 
         # Perform sourcefinding, determine mask:
         sources = run_sourcefinder(concat_obs[obs_keys.open_clean_fits])
-        write_ds9_regionfile(sources,
-                             os.path.join(fits_output_dir, 'all_sources.reg'))
+        
+        with open(os.path.join(fits_output_dir, 'extracted_sources.reg'), 'w') as regionfile:
+            regionfile.write(fk5_ellipse_regions_from_extractedsources(sources))
+        
+                             
         mask_thresh = 5.5
+        
+        MaskAp = namedtuple("MaskAp", "ra dec radius_deg")
+        mask_radius_deg = 20. / 3600.
         masked_sources = [s for s in sources if s.sig > mask_thresh]
-        write_ds9_regionfile(masked_sources,
-                             os.path.join(fits_output_dir, 'mask_sources.reg'))
+        mask_apertures = []
+        for ms in masked_sources:
+            mask_apertures.append(
+                  MaskAp(ra = ms.ra.value,
+                         dec = ms.dec.value,
+                         radius_deg=mask_radius_deg))
+#             a.smaj_asec.value
+        for mc in monitor_coords:
+            mask_apertures.append(
+                  MaskAp(ra=mc[0],
+                         dec=mc[1],
+                         radius_deg=mask_radius_deg))
 
-        mask_coords = [(str(s.ra.value) + 'deg', str(s.dec.value) + 'deg')
-                       for s in masked_sources]
+        with open(os.path.join(fits_output_dir, 'mask_aps.reg'), 'w') as regionfile:
+            regionfile.write(fk5_circle_regions_from_MaskAps(mask_apertures))
+#         write_ds9_regionfile(mask_apertures,
+#                              os.path.join(fits_output_dir, 'mask_apertures.reg'))
+
+
+        mask_coords = [(str(s.ra) + 'deg', str(s.dec) + 'deg')
+                       for s in mask_apertures]
         mask = drivecasa.utils.get_circular_mask_string(mask_coords,
-                                             aperture_radius="5pix")
+                         aperture_radius=str(mask_radius_deg) + "deg")
         logger.info("Mask:\n" + mask)
 
         # Now go and do masked and open cleans for everything:
@@ -305,7 +364,7 @@ def run_sourcefinder(path_to_fits_image,
     results = sfimg.extract(detection_thresh, analysis_thresh)
     return results
 
-def fk5_regions(sourcelist):
+def fk5_ellipse_regions_from_extractedsources(sourcelist):
     """
     Return a string containing a DS9-compatible region file describing all the
     sources in sourcelist.
@@ -319,15 +378,30 @@ def fk5_regions(sourcelist):
         print >> output, "ellipse(%f, %f, %f, %f, %f)" % (
             source.ra.value,
             source.dec.value,
-            source.smaj_asec.value * 2 / 3600.,
-            source.smin_asec.value * 2 / 3600.,
+            source.smaj_asec.value / 3600.,
+            source.smin_asec.value / 3600.,
             math.degrees(source.theta) + 90
         )
     return output.getvalue()
 
-def write_ds9_regionfile(sources, out_path):
-    with open(out_path, 'w') as regionfile:
-        regionfile.write(fk5_regions(sources))
+def fk5_circle_regions_from_MaskAps(aperture_list):
+    """
+    Return a string containing a DS9-compatible region file describing the simple
+    circular mask aperture objects.
+    """
+    output = StringIO()
+    print >> output, "# Region file format: DS9 version 4.1"
+    print >> output, "global color=green dashlist=8 3 width=1 font=\"helvetica 10 normal\" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1"
+    print >> output, "fk5"
+    for ap in aperture_list:
+        # NB, here we convert from internal 0-origin indexing to DS9 1-origin indexing
+        print >> output, "circle(%f, %f, %f)" % (
+            ap.ra,
+            ap.dec,
+            ap.radius_deg,
+        )
+    return output.getvalue()
+
 
 
 def output_preamble_to_log(groups):
