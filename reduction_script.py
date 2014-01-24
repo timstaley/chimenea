@@ -22,7 +22,7 @@ from tkp.accessors import writefits as tkp_writefits
 from tkp.sourcefinder.utils import generate_result_maps
 import tkp.bin.pyse
 
-ami_clean_args = {   "spw": '0:3~7',
+ami_clean_args = {   "spw": '0:2~6',
           "imsize": [512, 512],
           "cell": ['5.0arcsec'],
           "pbcor": False,
@@ -284,7 +284,7 @@ def clean_and_export_fits(obs_info, maps_out_dir, fits_output_dir,
                                     out_dir=maps_out_dir,
                                     overwrite=True)
     obs_info[obs_keys.open_clean_maps] = maps
-    # Dump a FITS version of the dirty map
+
     if fits_basename is None:
         fits_outpath = None
     else:
