@@ -1,64 +1,42 @@
 #!/usr/bin/env python
+from __future__ import absolute_import
 import optparse
 import os
 import sys
 import logging
-import simplejson as json
-import itertools
-import subprocess
-from StringIO import StringIO
-import math
+import logging.handlers
+import datetime
 
+from driveami import keys as meta_keys
 import drivecasa
-from drivecasa.keys import clean_results as clean_keys
-from driveami import keys as ami_keys
-import amisurvey
-from amisurvey.keys import obs_info as obs_keys
-from collections import namedtuple
 
-from tkp.accessors import FitsImage
-from tkp.accessors import sourcefinder_image_from_accessor
-from tkp.accessors import writefits as tkp_writefits
-from tkp.sourcefinder.utils import generate_result_maps
-import tkp.bin.pyse
-
-ami_clean_args = {   "spw": '0:2~6',
-          "imsize": [512, 512],
-          "cell": ['5.0arcsec'],
-          "pbcor": False,
-#           "weighting": 'natural',
-             "weighting": 'briggs',
-             "robust": 0.5,
-#          "weighting":'uniform',
-          "psfmode": 'clark',
-          "imagermode": 'csclean',
-          }
-
-
+from amisurvey.obsinfo import ObsInfo
+import amisurvey.subroutines as subs
+import amisurvey.utils as utils
 
 
 def handle_args():
     """
     Default values are defined here.
     """
-    default_output_dir = os.path.expanduser("/data2/ami_results")
+    default_output_dir = os.path.expanduser("~/ami_results")
     default_casa_dir = None
     usage = """usage: %prog [options] datasets_to_process.json\n"""
     parser = optparse.OptionParser(usage)
 
     parser.add_option("-o", "--output-dir", default=default_output_dir,
                       help="Path to output directory (default is : " +
-                            default_output_dir + ")")
+                           default_output_dir + ")")
 
     parser.add_option("--casa-dir", default=default_casa_dir,
-                   help="Path to CASA directory, default: " +
-                                str(default_casa_dir))
-    m_help = 'Specify a list of RA,DEC co-ordinate pairs to monitor (decimal' \
-         ' degrees, no spaces)'
+                      help="Path to CASA directory, default: " +
+                           str(default_casa_dir))
+    m_help = 'Specify a list of RA,DEC co-ordinate pairs to monitor' \
+             ' (decimal degrees, no spaces)'
     parser.add_option('-m', '--monitor-coords', help=m_help, default=None)
     parser.add_option('-l', '--monitor-list',
-                            help='Specify a file containing a list of RA,DEC',
-                            default=None)
+                      help='Specify a file containing a list of monitor coords.',
+                      default=None)
 
     options, args = parser.parse_args()
     options.output_dir = os.path.expanduser(options.output_dir)
@@ -68,373 +46,189 @@ def handle_args():
     print "Reducing files listed in:", args[0]
     return options, args[0]
 
-def parse_monitoringlist_positions(opts):
-    """Loads a list of monitoringlist (RA,Dec) tuples from cmd line opts object.
-
-    Processes the flags "--monitor-coords" and "--monitor-list"
-    NB This is just a dumb function that does not care about units,
-    those should be matched against whatever uses the resulting values...
-    """
-    monitor_coords = []
-    if opts.monitor_coords:
-        try:
-            monitor_coords.extend(json.loads(opts.monitor_coords))
-        except ValueError:
-            logging.error("Could not parse monitor-coords from command line:"
-                         "string passed was:\n%s", opts.monitor_coords
-                         )
-            raise
-    if opts.monitor_list:
-        try:
-            mon_list = json.load(open(opts.monitor_list))
-            monitor_coords.extend(mon_list)
-        except ValueError:
-            logging.error("Could not parse monitor-coords from file: "
-                              + opts.monitor_list)
-            raise
-    return monitor_coords
-
-def main(options, listings_file):
+def reduce_listings(listings_file, output_dir, monitor_coords):
+    logger = logging.getLogger()
     print "Processing all_obs in:", listings_file
-    all_obs = load_listings(listings_file)
-    obs_groups = get_grouped_file_listings(all_obs)
+    all_obs = utils.load_listings(listings_file)
+    obs_groups = utils.get_grouped_file_listings(all_obs)
     output_preamble_to_log(obs_groups)
 
-    monitor_coords = parse_monitoringlist_positions(options)
-    print "Monitoring coords:"
-    print monitor_coords
-
     for grp_name in sorted(obs_groups.keys()):
-        casa_output_dir = os.path.join(options.output_dir, grp_name, 'casa')
-        fits_output_dir = os.path.join(options.output_dir, grp_name, 'images')
-        casa_logfile = os.path.join(casa_output_dir, 'casalog.txt')
 
+        #Setup output directories:
+        grp_dir = os.path.join(os.path.expanduser(output_dir),
+                               str(grp_name))
+        casa_output_dir = os.path.join(grp_dir, 'casa')
+        fits_output_dir = os.path.join(grp_dir, 'images')
+        timestamp = datetime.datetime.now().strftime("%y-%m-%dT%H%M%S")
+        casa_logfile = os.path.join(casa_output_dir,
+                                    ''.join(('casalog_',timestamp,'.txt')))
         casa = drivecasa.Casapy(working_dir=casa_output_dir,
                                 casa_logfile=casa_logfile)
 
-        logger.info(' '.join(("Processing", grp_name,
-                             ", logfile at: ", casa_logfile)))
+        logger.info("Processing %s", grp_name)
+        logger.info("CASA Logfile at: %s",casa_logfile)
 
         grp_obs = obs_groups[grp_name]
-        grp_dir = os.path.join(os.path.expanduser(options.output_dir),
-                               str(grp_name))
+        #Filter those obs with extreme rain values
+        good_obs, rejected = subs.reject_bad_obs(grp_obs)
 
-        good_obs, rejected = reject_bad_obs(grp_obs)
-
-        script, concat_obs = import_and_concatenate(good_obs, casa_output_dir)
-
-        script.extend(make_dirty_map(concat_obs, casa_output_dir, fits_output_dir))
+        #Import UVFITs to MS, concatenate, make dirty maps
+        script, concat_obs = subs.import_and_concatenate(good_obs,
+                                                         casa_output_dir)
+        script.extend(subs.clean_and_export_fits(concat_obs,
+                                                 casa_output_dir,
+                                                 fits_output_dir,
+                                                 threshold=1,
+                                                 niter=0))
         for obs in good_obs:
-            script.extend(make_dirty_map(obs, casa_output_dir, fits_output_dir))
+            script.extend(subs.clean_and_export_fits(obs,
+                                                     casa_output_dir,
+                                                     fits_output_dir,
+                                                     threshold=1,
+                                                     niter=0))
 
-#         Ok, run what we have so far:
-        casa_out, errors = casa.run_script(script, raise_on_severe=False)
-        logger.debug("Got the following errors (probably all ok)")
-        for e in errors:
-            logger.debug(e)
+        # Ok, run what we have so far:
+        logger.info("Concatenating, making dirty maps...")
+        casa_out, errors = casa.run_script(script, raise_on_severe=True)
+        if errors:
+            logger.warning("Got the following errors (probably all ok)")
+            for e in errors:
+                logger.warning(e)
+
         # Now we can grab an estimate of the RMS for each map:
-
-        concat_obs[obs_keys.dirty_rms_est] = get_image_rms_estimate(
-                            concat_obs[obs_keys.dirty_maps][clean_keys.image])
+        logger.info("Estimating RMS...")
+        concat_obs.dirty_rms = subs.get_image_rms_estimate(
+                                            concat_obs.dirty_maps.ms.image)
         for obs in good_obs:
-            dmap = obs[obs_keys.dirty_maps][clean_keys.image]
-            obs[obs_keys.dirty_rms_est] = get_image_rms_estimate(dmap)
+            dmap = obs.dirty_maps.ms.image
+            obs.dirty_rms = subs.get_image_rms_estimate(dmap)
 
         # Ok, let's do an open clean on the concat map, to try and create a
         # deep source catalogue:
-        script = make_open_clean_map(concat_obs, casa_output_dir, fits_output_dir)
-        casa_out, errors = casa.run_script(script, raise_on_severe=False)
-
+        logger.info("Performing open clean on concat image...")
+        script = subs.clean_and_export_fits(concat_obs,
+                                            casa_output_dir, fits_output_dir,
+                                            threshold=concat_obs.dirty_rms*3)
+        casa_out, errors = casa.run_script(script, raise_on_severe=True)
 
         # Perform sourcefinding, determine mask:
-        sources = run_sourcefinder(concat_obs[obs_keys.open_clean_fits])
+        logger.info("Sourcefinding on concat image...")
+        sources = subs.run_sourcefinder(concat_obs.open_clean_maps.fits.image)
         
         with open(os.path.join(fits_output_dir, 'extracted_sources.reg'), 'w') as regionfile:
-            regionfile.write(fk5_ellipse_regions_from_extractedsources(sources))
-        
-                             
-        mask_thresh = 5.5
-        
-        MaskAp = namedtuple("MaskAp", "ra dec radius_deg")
-        mask_radius_deg = 20. / 3600.
-        masked_sources = [s for s in sources if s.sig > mask_thresh]
-        mask_apertures = []
-        for ms in masked_sources:
-            mask_apertures.append(
-                  MaskAp(ra = ms.ra.value,
-                         dec = ms.dec.value,
-                         radius_deg=mask_radius_deg))
-#             a.smaj_asec.value
-        for mc in monitor_coords:
-            mask_apertures.append(
-                  MaskAp(ra=mc[0],
-                         dec=mc[1],
-                         radius_deg=mask_radius_deg))
+            regionfile.write(utils.fk5_ellipse_regions_from_extractedsources(sources))
 
-        with open(os.path.join(fits_output_dir, 'mask_aps.reg'), 'w') as regionfile:
-            regionfile.write(fk5_circle_regions_from_MaskAps(mask_apertures))
-#         write_ds9_regionfile(mask_apertures,
-#                              os.path.join(fits_output_dir, 'mask_apertures.reg'))
+        mask, mask_apertures = utils.generate_mask(
+            aperture_radius_degrees=60./3600,
+            extracted_sources=sources,
+            extracted_source_sigma_thresh=5.5,
+            monitoring_coords=monitor_coords,
+            regionfile_path=os.path.join(fits_output_dir, 'mask_aps.reg')
+        )
 
+        logger.info("Generated mask:\n" + mask)
 
-        mask_coords = [(str(s.ra) + 'deg', str(s.dec) + 'deg')
-                       for s in mask_apertures]
-        mask = drivecasa.utils.get_circular_mask_string(mask_coords,
-                         aperture_radius=str(mask_radius_deg) + "deg")
-        logger.info("Mask:\n" + mask)
-
-        # Now go and do masked and open cleans for everything:
+        # Do open clean for each epoch:
         script = []
-
-        script.extend(
-          make_masked_clean_map(concat_obs, mask, casa_output_dir, fits_output_dir))
         for obs in good_obs:
+            assert isinstance(obs, ObsInfo)
             script.extend(
-              make_open_clean_map(obs, casa_output_dir, fits_output_dir))
-            script.extend(
-              make_masked_clean_map(obs, mask, casa_output_dir, fits_output_dir))
+                subs.clean_and_export_fits(obs,
+                                           casa_output_dir, fits_output_dir,
+                                           threshold=obs.dirty_rms*3))
+        logger.info("Running open cleans on all images in group (may take a while)...")
+        casa_out, errors = casa.run_script(script, raise_on_severe=True)
 
-        # Go!
-        casa_out, errors = casa.run_script(script, raise_on_severe=False)
+        # Finally, run masked cleans on epochal and concatenated obs:
+        script = []
+        if len(mask_apertures):
+            script.extend(
+              subs.clean_and_export_fits(concat_obs,
+                                         casa_output_dir, fits_output_dir,
+                                         mask=mask,
+                                         threshold=obs.dirty_rms*3))
+            for obs in good_obs:
+                script.extend(
+                  subs.clean_and_export_fits(obs,
+                                           casa_output_dir, fits_output_dir,
+                                           mask=mask,
+                                           threshold=obs.dirty_rms*3))
+
+
+            logger.info("Running masked cleans on all images in group (may take a while)...")
+            casa_out, errors = casa.run_script(script, raise_on_severe=True)
+            logger.info("Done!")
     return obs_groups
 
-def load_listings(listings_path):
-    # simplejson loads plain strings as simple 'str' objects:
-    ami_listings = json.load(open(listings_path))
-    all_obs = []
-    for ami_rawfile, ami_obs in ami_listings.iteritems():
-        all_obs.append({
-                        obs_keys.name:ami_obs[ami_keys.obs_name],
-                        obs_keys.metadata:ami_obs,
-                        obs_keys.uvfits:ami_obs[ami_keys.target_uvfits],
-                        obs_keys.group:ami_obs[ami_keys.group_name],
-                        })
-    return all_obs
-
-def get_grouped_file_listings(all_obs):
-    grp_names = list(set([obs[obs_keys.group] for obs in all_obs]))
-    groups = {}
-    for g_name in grp_names:
-        grp = [obs for obs in all_obs if obs[obs_keys.group] == g_name]
-        groups[g_name] = grp
-    return groups
-
-def reject_bad_obs(obs_list):
-    """Returns 2 lists: (passed,failed)"""
-            # Reject those with extreme rain modulation:
-    good_files = []
-    rain_rejected = []
-    for obs in obs_list:
-        rain_amp_mod = obs[obs_keys.metadata][ami_keys.rain]
-        if (rain_amp_mod > 0.8 and rain_amp_mod < 1.2):
-            good_files.append(obs)
-        else:
-            rain_rejected.append(obs)
-            print "Rejected file", obs[obs_keys.name],
-            print " due to rain value", rain_amp_mod
-    return good_files, rain_rejected
 
 
-def import_and_concatenate(obs_list, casa_output_dir):
+
+##=======================================================================
+
+def setup_logging():
     """
-    Import uvfits, create a concatenated obs.
-    *Returns:*
-      - tuple: (script, concat_obs_info)
+    Set up basic (INFO level) and debug logfiles
     """
-    groups = set([obs[obs_keys.group] for obs in obs_list])
-    assert len(groups) == 1
-    group_name = groups.pop()
-    script = []
-    for obs in obs_list:
-        obs[obs_keys.vis ] = drivecasa.commands.import_uvfits(script,
-                                             obs[obs_keys.uvfits],
-                                             out_dir=casa_output_dir,
-                                             overwrite=True)
+    log_filename = 'amisurvey_log'
+    date_fmt = "%y-%m-%d (%a) %H:%M:%S"
+
+    std_formatter = logging.Formatter('%(asctime)s:%(levelname)s:%(message)s',
+                                      date_fmt)
+    debug_formatter = logging.Formatter(
+                            '%(asctime)s:%(name)s:%(levelname)s:%(message)s',
+                            # '%(asctime)s:%(levelname)s:%(message)s',
+                            date_fmt)
+
+    info_logfile = logging.handlers.RotatingFileHandler(log_filename,
+                            maxBytes=5e5, backupCount=10)
+    info_logfile.setFormatter(std_formatter)
+    info_logfile.setLevel(logging.INFO)
+    debug_logfile = logging.handlers.RotatingFileHandler(log_filename + '.debug',
+                            maxBytes=5e5, backupCount=10)
+    debug_logfile.setFormatter(debug_formatter)
+    debug_logfile.setLevel(logging.DEBUG)
+
+    stdout_log = logging.StreamHandler()
+    stdout_log.setFormatter(std_formatter)
+    stdout_log.setLevel(logging.INFO)
+    stdout_log.setLevel(logging.DEBUG)
 
 
-    # Concatenate the data to create a master image:
-    concat_obs = {}
-    concat_obs[obs_keys.name] = group_name + '_concat'
-    concat_obs[obs_keys.vis] = drivecasa.commands.concat(
-                                     script,
-                                     [obs[obs_keys.vis] for obs in obs_list],
-                                     out_basename=concat_obs[obs_keys.name],
-                                     out_dir=casa_output_dir,
-                                     overwrite=True)
-    return script, concat_obs
-
-
-
-
-def clean_and_export_fits(obs_info, maps_out_dir, fits_output_dir,
-                          niter=500,
-                          mask='',
-                          threshold=None,
-                          fits_basename=None):
-    script = []
-    if niter == 0:
-        # Doesn't make a difference, so we just set an arbitrary valid value:
-        threshold = 1
-    maps = drivecasa.commands.clean(script,
-                                    vis_path=obs_info[obs_keys.vis],
-                                    niter=niter,
-                                    threshold_in_jy=threshold,
-                                    mask=mask,
-                                    other_clean_args=ami_clean_args,
-                                    out_dir=maps_out_dir,
-                                    overwrite=True)
-    obs_info[obs_keys.open_clean_maps] = maps
-
-    if fits_basename is None:
-        fits_outpath = None
-    else:
-        fits_outpath = os.path.join(fits_output_dir, fits_basename + '.fits')
-    fits = drivecasa.commands.export_fits(script,
-                                        image_path=maps[clean_keys.image],
-                                        out_dir=fits_output_dir,
-                                        out_path=fits_outpath,
-                                        overwrite=True)
-    return script, maps, fits
-
-def make_dirty_map(obs_info, casa_output_dir, fits_output_dir):
-    # Do a dirty clean to get a first, rough estimate of the noise level.
-    dirty_maps_dir = os.path.join(casa_output_dir, 'dirty')
-
-    script, maps, fits = clean_and_export_fits(obs_info,
-                                               dirty_maps_dir,
-                                               fits_output_dir,
-                                               niter=0)
-    obs_info[obs_keys.dirty_maps] = maps
-    obs_info[obs_keys.dirty_fits] = fits
-    return script
-
-def make_open_clean_map(obs_info, casa_output_dir, fits_output_dir):
-    open_clean_dir = os.path.join(casa_output_dir, 'open_clean')
-    fits_basename = obs_info[obs_keys.name] + '_open'
-    clean_thresh = obs_info[obs_keys.dirty_rms_est] * 3
-
-    script, maps, fits = clean_and_export_fits(obs_info,
-                                               open_clean_dir,
-                                               fits_output_dir,
-                                               threshold=clean_thresh,
-                                               fits_basename=fits_basename)
-    obs_info[obs_keys.open_clean_maps] = maps
-    obs_info[obs_keys.open_clean_fits] = fits
-    return script
-
-def make_masked_clean_map(obs_info, mask, casa_output_dir, fits_output_dir):
-    masked_clean_dir = os.path.join(casa_output_dir, 'masked_clean')
-    fits_basename = obs_info[obs_keys.name] + '_masked'
-    clean_thresh = obs_info[obs_keys.dirty_rms_est] * 3
-    script, maps, fits = clean_and_export_fits(obs_info,
-                                               masked_clean_dir,
-                                               fits_output_dir,
-                                               mask=mask,
-                                               threshold=clean_thresh,
-                                               fits_basename=fits_basename
-                                               )
-    obs_info[obs_keys.masked_clean_maps] = maps
-    obs_info[obs_keys.masked_clean_fits] = fits
-    return script
-
-
-def get_image_rms_estimate(path_to_casa_image):
-    map = amisurvey.load_casa_imagedata(path_to_casa_image)
-    return amisurvey.sigmaclip.rms_with_clipped_subregion(map, sigma=3, f=3)
-
-def run_sourcefinder(path_to_fits_image,
-                      detection_thresh=5,
-                      analysis_thresh=3,
-                      back_size=64,
-                      margin=128,
-                      radius=0,
-                      ):
-    sf_config = {
-        "back_sizex": back_size,
-        "back_sizey": back_size,
-        "margin": margin,
-        "radius": radius,
-        "deblend": True,
-        "deblend_nthresh": 32,
-        "force_beam": False
-        }
-
-    sfimg = sourcefinder_image_from_accessor(FitsImage(path_to_fits_image),
-                                             **sf_config)
-    results = sfimg.extract(detection_thresh, analysis_thresh)
-    return results
-
-def fk5_ellipse_regions_from_extractedsources(sourcelist):
-    """
-    Return a string containing a DS9-compatible region file describing all the
-    sources in sourcelist.
-    """
-    output = StringIO()
-    print >> output, "# Region file format: DS9 version 4.1"
-    print >> output, "global color=green dashlist=8 3 width=1 font=\"helvetica 10 normal\" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1"
-    print >> output, "fk5"
-    for source in sourcelist:
-        # NB, here we convert from internal 0-origin indexing to DS9 1-origin indexing
-        print >> output, "ellipse(%f, %f, %f, %f, %f)" % (
-            source.ra.value,
-            source.dec.value,
-            source.smaj_asec.value / 3600.,
-            source.smin_asec.value / 3600.,
-            math.degrees(source.theta) + 90
-        )
-    return output.getvalue()
-
-def fk5_circle_regions_from_MaskAps(aperture_list):
-    """
-    Return a string containing a DS9-compatible region file describing the simple
-    circular mask aperture objects.
-    """
-    output = StringIO()
-    print >> output, "# Region file format: DS9 version 4.1"
-    print >> output, "global color=green dashlist=8 3 width=1 font=\"helvetica 10 normal\" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1"
-    print >> output, "fk5"
-    for ap in aperture_list:
-        # NB, here we convert from internal 0-origin indexing to DS9 1-origin indexing
-        print >> output, "circle(%f, %f, %f)" % (
-            ap.ra,
-            ap.dec,
-            ap.radius_deg,
-        )
-    return output.getvalue()
-
-
+    logger = logging.getLogger()
+    logger.handlers=[]
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(info_logfile)
+    logger.addHandler(debug_logfile)
+    logger.addHandler(stdout_log)
+    logging.getLogger('drivecasa').setLevel(logging.ERROR) #Suppress drivecasa debug log.
+    logging.getLogger('tkp').setLevel(logging.ERROR) #Suppress SF / coords debug log.
 
 def output_preamble_to_log(groups):
+    logger=logging.getLogger()
     logger.info("*************************")
     logger.info("Processing groups:")
     for key in sorted(groups.keys()):
         logger.info("%s:", key)
 
-        pointings = [f[obs_keys.metadata][ami_keys.pointing_fk5]
-                        for f in groups[key] ]
+        pointings = [f.meta[meta_keys.pointing_fk5] for f in groups[key] ]
         pointings = set((i[0], i[1]) for i in pointings)
-        print "\t ", len(pointings), "different pointings:",
-        print pointings
-        print
+        logger.info("%s different pointings:" % len(pointings))
+        logger.info(str(pointings))
         for f in groups[key]:
-            pointing = f[obs_keys.metadata][ami_keys.pointing_fk5]
+            pointing = f.meta[meta_keys.pointing_fk5]
             ra, dec = pointing[0], pointing[1]
-            logger.info("\t %s, \t (%.4f,%.4f)", f[obs_keys.name], ra, dec),
+            logger.info("\t %s,  (%.4f,%.4f)", f.name.ljust(24), ra, dec),
         logger.info("--------------------------------")
     logger.info("*************************")
 
 ##=======================================================================
 if __name__ == "__main__":
-    logging.basicConfig(format='%(levelname)s:%(message)s',
-                    filemode='w',
-                    filename="drive-casa.log",
-                    level=logging.DEBUG)
-    logger = logging.getLogger()
-    log_stdout = logging.StreamHandler(sys.stdout)
-    log_stdout.setLevel(logging.INFO)
-    logger.addHandler(log_stdout)
+    setup_logging()
+    logger=logging.getLogger()
     options, listings_file = handle_args()
-    print "OPTIONS", options
-    main(options, listings_file)
+    monitor_coords = utils.parse_monitoringlist_positions(options)
+    logger.info("Monitoring coords:\n %s", str(monitor_coords))
+    reduce_listings(listings_file, options.output_dir, monitor_coords)
     sys.exit(0)
 

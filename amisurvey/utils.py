@@ -1,4 +1,20 @@
+"""
+Boring bits of code that make things happen, but aren't scientifically
+significant.
+"""
+
+from StringIO import StringIO
+import math
+from collections import namedtuple
+import logging
+import simplejson as json
 import pyrap.tables
+from amisurvey.obsinfo import ObsInfo
+from driveami import keys as meta_keys
+import drivecasa
+logger = logging.getLogger()
+
+MaskAp = namedtuple("MaskAp", "ra dec radius_deg")
 
 def load_casa_imagedata(path_to_ms):
     """Loads the pixel data as a numpy array"""
@@ -6,3 +22,116 @@ def load_casa_imagedata(path_to_ms):
     map = tbl[0]['map'].squeeze()
     map = map.transpose()
     return map
+
+
+def fk5_ellipse_regions_from_extractedsources(sourcelist):
+    """
+    Return a string containing a DS9-compatible region file describing all the
+    sources in sourcelist.
+    """
+    output = StringIO()
+    print >> output, "# Region file format: DS9 version 4.1"
+    print >> output, "global color=green dashlist=8 3 width=1 font=\"helvetica 10 normal\" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1"
+    print >> output, "fk5"
+    for source in sourcelist:
+        print >> output, "ellipse(%f, %f, %f, %f, %f)" % (
+            source.ra.value,
+            source.dec.value,
+            source.smaj_asec.value / 3600.,
+            source.smin_asec.value / 3600.,
+            math.degrees(source.theta) + 90
+        )
+    return output.getvalue()
+
+def fk5_circle_regions_from_MaskAps(aperture_list):
+    """
+    Return a string containing a DS9-compatible region file describing the simple
+    circular mask aperture objects.
+    """
+    output = StringIO()
+    print >> output, "# Region file format: DS9 version 4.1"
+    print >> output, "global color=green dashlist=8 3 width=1 font=\"helvetica 10 normal\" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1"
+    print >> output, "fk5"
+    for ap in aperture_list:
+        print >> output, "circle(%f, %f, %f)" % (
+            ap.ra,
+            ap.dec,
+            ap.radius_deg,
+        )
+    return output.getvalue()
+
+def parse_monitoringlist_positions(opts):
+    """Loads a list of monitoringlist (RA,Dec) tuples from cmd line opts object.
+
+    Processes the flags "--monitor-coords" and "--monitor-list"
+    NB This is just a dumb function that does not care about units,
+    those should be matched against whatever uses the resulting values...
+    """
+    monitor_coords = []
+    if opts.monitor_coords:
+        try:
+            monitor_coords.extend(json.loads(opts.monitor_coords))
+        except ValueError:
+            logger.error("Could not parse monitor-coords from command line:"
+                         "string passed was:\n%s", opts.monitor_coords
+                         )
+            raise
+    if opts.monitor_list:
+        try:
+            mon_list = json.load(open(opts.monitor_list))
+            monitor_coords.extend(mon_list)
+        except ValueError:
+            logger.error("Could not parse monitor-coords from file: "
+                              + opts.monitor_list)
+            raise
+    return monitor_coords
+
+def load_listings(listings_path):
+    # simplejson loads plain strings as simple 'str' objects:
+    ami_listings = json.load(open(listings_path))
+    all_obs = []
+    for ami_rawfile, ami_obs in ami_listings.iteritems():
+        all_obs.append(ObsInfo(name = ami_obs[meta_keys.obs_name],
+                               group= ami_obs[meta_keys.group_name],
+                               metadata=ami_obs,
+                               uvfits=ami_obs[meta_keys.target_uvfits]))
+    return all_obs
+
+def get_grouped_file_listings(all_obs):
+    grp_names = list(set([obs.group for obs in all_obs]))
+    groups_dict = {}
+    for g_name in grp_names:
+        grp = [obs for obs in all_obs if obs.group == g_name]
+        groups_dict[g_name] = grp
+    return groups_dict
+
+def generate_mask(aperture_radius_degrees,
+                  extracted_sources=None,
+                  extracted_source_sigma_thresh = 5.5,
+                  monitoring_coords=None,
+                  regionfile_path=None
+                  ):
+
+    masked_sources = [s for s in extracted_sources
+                      if s.sig > extracted_source_sigma_thresh]
+    mask_apertures = []
+    for ms in masked_sources:
+        mask_apertures.append(
+            MaskAp(ra = ms.ra.value,
+                   dec = ms.dec.value,
+                   radius_deg=aperture_radius_degrees))
+    if monitoring_coords:
+        for mc in monitoring_coords:
+            mask_apertures.append(
+                MaskAp(ra=mc[0], dec=mc[1], radius_deg=aperture_radius_degrees))
+
+    if regionfile_path is not None:
+        with open(regionfile_path, 'w') as regionfile:
+                regionfile.write(fk5_circle_regions_from_MaskAps(mask_apertures))
+
+    mask_coords = [(str(s.ra) + 'deg', str(s.dec) + 'deg')
+                       for s in mask_apertures]
+    mask = drivecasa.utils.get_circular_mask_string(mask_coords,
+                         aperture_radius=str(aperture_radius_degrees) + "deg")
+
+    return mask, mask_apertures

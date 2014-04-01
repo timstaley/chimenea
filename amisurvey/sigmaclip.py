@@ -1,5 +1,5 @@
 """
-functions for calculating statistical properties of LOFAR images
+functions for calculating statistical properties of images
 """
 import numpy
 
