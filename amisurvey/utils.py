@@ -87,17 +87,22 @@ def parse_monitoringlist_positions(opts):
     return monitor_coords
 
 def load_listings(listings_path):
+    """
+    Loads a list of ObsInfo objects from a json file
+    """
     # simplejson loads plain strings as simple 'str' objects:
     ami_listings = json.load(open(listings_path))
     all_obs = []
     for ami_rawfile, ami_obs in ami_listings.iteritems():
-        all_obs.append(ObsInfo(name = ami_obs[meta_keys.obs_name],
-                               group= ami_obs[meta_keys.group_name],
-                               metadata=ami_obs,
-                               uvfits=ami_obs[meta_keys.target_uvfits]))
+        all_obs.append(ObsInfo.from_processed_ami_info(ami_obs))
     return all_obs
 
 def get_grouped_file_listings(all_obs):
+    """
+    Groups a list of ObsInfo objects by ``group`` attribute.
+
+    Returns: Dict mapping groupname -> list of ObsInfo
+    """
     grp_names = list(set([obs.group for obs in all_obs]))
     groups_dict = {}
     for g_name in grp_names:

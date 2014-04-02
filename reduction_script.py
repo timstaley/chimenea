@@ -17,10 +17,13 @@ import amisurvey.utils as utils
 
 def handle_args():
     """
-    Default values are defined here.
+    Defines command line arguments.
+
+    Default values can be tweaked here.
     """
     default_output_dir = os.path.expanduser("~/ami_results")
     default_casa_dir = None
+
     usage = """usage: %prog [options] datasets_to_process.json\n"""
     parser = optparse.OptionParser(usage)
 
@@ -46,37 +49,48 @@ def handle_args():
     print "Reducing files listed in:", args[0]
     return options, args[0]
 
-def reduce_listings(listings_file, output_dir, monitor_coords):
+def reduce_listings(listings_file, output_dir, monitor_coords,
+                    reduction_timestamp):
+    """
+    Perform data reduction on observations listed in ``listings_file``.
+
+    **Args:**
+
+    - listings_file: Path to json file containing observations info.
+    - output_dir: Outputs here, futher divided into 'casa' and 'images' folders.
+    - monitor_coords: a list of (RA,Dec) tuples which we want to add to our clean
+      mask.
+    - reduction_timestamp: Timestamp used when naming logfiles.
+    """
     logger = logging.getLogger()
     print "Processing all_obs in:", listings_file
     all_obs = utils.load_listings(listings_file)
-    obs_groups = utils.get_grouped_file_listings(all_obs)
-    output_preamble_to_log(obs_groups)
+    groups = utils.get_grouped_file_listings(all_obs)
+    output_preamble_to_log(groups)
 
-    for grp_name in sorted(obs_groups.keys()):
-
+    for group_name in sorted(groups.keys()):
         #Setup output directories:
-        grp_dir = os.path.join(os.path.expanduser(output_dir),
-                               str(grp_name))
+        grp_dir = os.path.join(os.path.expanduser(output_dir), str(group_name))
         casa_output_dir = os.path.join(grp_dir, 'casa')
         fits_output_dir = os.path.join(grp_dir, 'images')
-        timestamp = datetime.datetime.now().strftime("%y-%m-%dT%H%M%S")
+
         casa_logfile = os.path.join(casa_output_dir,
-                                    ''.join(('casalog_',timestamp,'.txt')))
+                            ''.join(('casalog_',reduction_timestamp,'.txt')))
         casa = drivecasa.Casapy(working_dir=casa_output_dir,
                                 casa_logfile=casa_logfile)
 
-        logger.info("Processing %s", grp_name)
+        logger.info("Processing %s", group_name)
         logger.info("CASA Logfile at: %s",casa_logfile)
 
-        grp_obs = obs_groups[grp_name]
+
         #Filter those obs with extreme rain values
-        good_obs, rejected = subs.reject_bad_obs(grp_obs)
+        good_obs, rejected = subs.reject_bad_obs(groups[group_name],
+                                                 rain_min=0.8, rain_max=1.2)
 
         #Import UVFITs to MS, concatenate, make dirty maps
-        script, concat_obs = subs.import_and_concatenate(good_obs,
+        script, concat_ob = subs.import_and_concatenate(good_obs,
                                                          casa_output_dir)
-        script.extend(subs.clean_and_export_fits(concat_obs,
+        script.extend(subs.clean_and_export_fits(concat_ob,
                                                  casa_output_dir,
                                                  fits_output_dir,
                                                  threshold=1,
@@ -97,25 +111,62 @@ def reduce_listings(listings_file, output_dir, monitor_coords):
                 logger.warning(e)
 
         # Now we can grab an estimate of the RMS for each map:
-        logger.info("Estimating RMS...")
-        concat_obs.dirty_rms = subs.get_image_rms_estimate(
-                                            concat_obs.dirty_maps.ms.image)
-        for obs in good_obs:
-            dmap = obs.dirty_maps.ms.image
-            obs.dirty_rms = subs.get_image_rms_estimate(dmap)
+        logger.info("Initial estimate of RMS from dirty map...")
+        for obs in good_obs+[concat_ob]:
+            dmap = obs.maps_dirty.ms.image
+            obs.rms_dirty= subs.get_image_rms_estimate(dmap)
+            obs.rms_best = obs.rms_dirty
+            logger.debug("%s; dirty map RMS est: %s", obs.name, obs.rms_dirty)
 
-        # Ok, let's do an open clean on the concat map, to try and create a
-        # deep source catalogue:
+
         logger.info("Performing open clean on concat image...")
-        script = subs.clean_and_export_fits(concat_obs,
+        script = subs.clean_and_export_fits(concat_ob,
                                             casa_output_dir, fits_output_dir,
-                                            threshold=concat_obs.dirty_rms*3)
+                                            threshold=concat_ob.rms_dirty*3)
         casa_out, errors = casa.run_script(script, raise_on_severe=True)
 
-        # Perform sourcefinding, determine mask:
+
+        max_recleans = 3
+        max_acceptable_delta = 0.05
+        reclean_iter = 0
+        # Do open clean for each epoch:
+        while reclean_iter < max_recleans:
+            logging.info("Reclean cycle %s", reclean_iter)
+            reclean_iter+=1
+
+            obs_to_be_recleaned=[ obs for obs in good_obs + [concat_ob]
+                                  if obs.rms_delta > max_acceptable_delta]
+
+            script = []
+            for obs in obs_to_be_recleaned:
+                assert isinstance(obs, ObsInfo)
+                script.extend(
+                    subs.clean_and_export_fits(obs,
+                                               casa_output_dir, fits_output_dir,
+                                               threshold=obs.rms_best*3))
+            logger.info("Running open cleans (may take a while)...")
+            casa_out, errors = casa.run_script(script, raise_on_severe=True)
+
+            # Get new estimate of RMS for each map:
+            logger.info("Re-estimating RMS's...")
+            for obs in obs_to_be_recleaned:
+                map = obs.maps_open.ms.image
+                new_rms = subs.get_image_rms_estimate(map)
+                obs.rms_delta = (obs.rms_best - new_rms ) / obs.rms_best
+                logger.debug("%s; RMS est, old: %s, new:%s, delta:%s",
+                             obs.name, obs.rms_best, new_rms, obs.rms_delta)
+                obs.rms_best=new_rms
+                if (obs.rms_delta<0):
+                    logger.warn("%s RMS *increased* after clean, delta: %s",
+                                obs.name, obs.rms_delta)
+
+
+
+        # Perform sourcefinding on the open-clean concat map,to try and create a
+        # deep source catalogue. Use it to determine mask:
         logger.info("Sourcefinding on concat image...")
-        sources = subs.run_sourcefinder(concat_obs.open_clean_maps.fits.image)
-        
+        sources = subs.run_sourcefinder(concat_ob.maps_open.fits.image)
+
         with open(os.path.join(fits_output_dir, 'extracted_sources.reg'), 'w') as regionfile:
             regionfile.write(utils.fk5_ellipse_regions_from_extractedsources(sources))
 
@@ -129,48 +180,33 @@ def reduce_listings(listings_file, output_dir, monitor_coords):
 
         logger.info("Generated mask:\n" + mask)
 
-        # Do open clean for each epoch:
-        script = []
-        for obs in good_obs:
-            assert isinstance(obs, ObsInfo)
-            script.extend(
-                subs.clean_and_export_fits(obs,
-                                           casa_output_dir, fits_output_dir,
-                                           threshold=obs.dirty_rms*3))
-        logger.info("Running open cleans on all images in group (may take a while)...")
-        casa_out, errors = casa.run_script(script, raise_on_severe=True)
 
         # Finally, run masked cleans on epochal and concatenated obs:
         script = []
         if len(mask_apertures):
-            script.extend(
-              subs.clean_and_export_fits(concat_obs,
-                                         casa_output_dir, fits_output_dir,
-                                         mask=mask,
-                                         threshold=obs.dirty_rms*3))
-            for obs in good_obs:
+            for obs in good_obs + [concat_ob]:
                 script.extend(
                   subs.clean_and_export_fits(obs,
                                            casa_output_dir, fits_output_dir,
                                            mask=mask,
-                                           threshold=obs.dirty_rms*3))
+                                           threshold=obs.rms_best*3))
 
 
             logger.info("Running masked cleans on all images in group (may take a while)...")
             casa_out, errors = casa.run_script(script, raise_on_severe=True)
             logger.info("Done!")
-    return obs_groups
+    return groups
 
 
 
 
 ##=======================================================================
 
-def setup_logging():
+def setup_logging(reduction_timestamp):
     """
     Set up basic (INFO level) and debug logfiles
     """
-    log_filename = 'amisurvey_log'
+    log_filename = 'amisurvey_log_'+reduction_timestamp
     date_fmt = "%y-%m-%d (%a) %H:%M:%S"
 
     std_formatter = logging.Formatter('%(asctime)s:%(levelname)s:%(message)s',
@@ -205,6 +241,9 @@ def setup_logging():
     logging.getLogger('tkp').setLevel(logging.ERROR) #Suppress SF / coords debug log.
 
 def output_preamble_to_log(groups):
+    """
+    Prettyprint the group listings
+    """
     logger=logging.getLogger()
     logger.info("*************************")
     logger.info("Processing groups:")
@@ -224,11 +263,13 @@ def output_preamble_to_log(groups):
 
 ##=======================================================================
 if __name__ == "__main__":
-    setup_logging()
+    timestamp = datetime.datetime.now().strftime("%y-%m-%dT%H%M%S")
+    setup_logging(timestamp)
     logger=logging.getLogger()
     options, listings_file = handle_args()
     monitor_coords = utils.parse_monitoringlist_positions(options)
     logger.info("Monitoring coords:\n %s", str(monitor_coords))
-    reduce_listings(listings_file, options.output_dir, monitor_coords)
+    reduce_listings(listings_file, options.output_dir, monitor_coords,
+                    timestamp)
     sys.exit(0)
 

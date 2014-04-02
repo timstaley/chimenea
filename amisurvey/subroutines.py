@@ -20,14 +20,20 @@ import tkp.bin.pyse
 
 logger = logging.getLogger(__name__)
 
-def reject_bad_obs(obs_list):
-    """Returns 2 lists: (passed,failed)"""
-            # Reject those with extreme rain modulation:
+def reject_bad_obs(obs_list, rain_min, rain_max):
+    """
+    Run quality control on a list of ObsInfo.
+
+    Currently just filters on rain gauge values.
+
+    Returns 2 lists: [passed],[failed]
+    """
+
     good_files = []
     rain_rejected = []
     for obs in obs_list:
         rain_amp_mod = obs.meta[meta_keys.rain]
-        if (rain_amp_mod > 0.8 and rain_amp_mod < 1.2):
+        if (rain_amp_mod > rain_min and rain_amp_mod < rain_max):
             good_files.append(obs)
         else:
             rain_rejected.append(obs)
@@ -76,10 +82,20 @@ def clean_and_export_fits(obs_info,
     Runs clean. Uses a little logic on the arguments to perform
     output-path determination magic.
 
-    @type obs_info: ObsInfo
+    **Args**:
+
+    - obs_info: ObsInfo object
+    - casa_output_dir, fits_output_dir: obvious
+    - threshold: Clean threshold, in Janskys.
+    - niter: Max number of iterations per Clean invocation, passed to CASA-Clean.
+    - mask: String representing the mask apertures, passed to CASA-Clean.
+
 
     *Returns:* script
     """
+    assert isinstance(obs_info, ObsInfo)
+    logger.debug('Scripting clean for %s, niter=%s, threshold=%sJy',
+                 obs_info.name, niter, threshold)
     script = []
     fits_basename=None
     # Determine if we're running the dirty, open-clean or masked clean
@@ -87,18 +103,17 @@ def clean_and_export_fits(obs_info,
     if niter == 0:
         #Dirty map generation
         maps_dir =  os.path.join(casa_output_dir, 'dirty')
-        msfits_attr = 'dirty_maps'
+        msfits_attr = 'maps_dirty'
     elif mask =='':
         #Open Clean
         maps_dir = os.path.join(casa_output_dir, 'open_clean')
-        msfits_attr = 'open_clean_maps'
+        msfits_attr = 'maps_open'
         fits_basename = obs_info.name + '_open'
     else:
         #Masked clean
         maps_dir = os.path.join(casa_output_dir, 'masked_clean')
-        msfits_attr = 'masked_clean_maps'
+        msfits_attr = 'maps_masked'
         fits_basename = obs_info.name + '_masked'
-
 
     maps = drivecasa.commands.clean(script,
                                     vis_path=obs_info.uv_ms,
