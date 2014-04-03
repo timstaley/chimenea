@@ -75,9 +75,9 @@ def import_and_concatenate(obs_list, casa_output_dir):
 def clean_and_export_fits(obs_info,
                           casa_output_dir, fits_output_dir,
                           threshold,
-                          niter=500,
-                          mask='',
-                          other_clean_args=default_ami_clean_args):
+                          niter,
+                          mask,
+                          other_clean_args):
     """
     Runs clean. Uses a little logic on the arguments to perform
     output-path determination magic.

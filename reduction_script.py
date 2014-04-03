@@ -14,7 +14,6 @@ from amisurvey.obsinfo import ObsInfo
 import amisurvey.subroutines as subs
 import amisurvey.utils as utils
 
-
 def handle_args():
     """
     Defines command line arguments.
@@ -62,6 +61,31 @@ def reduce_listings(listings_file, output_dir, monitor_coords,
       mask.
     - reduction_timestamp: Timestamp used when naming logfiles.
     """
+    ### Variables that may need changing:
+    ami_clean_args = {   "spw": '0:0~5',
+          "imsize": [512, 512],
+          "cell": ['5.0arcsec'],
+          "pbcor": False,
+#           "weighting": 'natural',
+             "weighting": 'briggs',
+             "robust": 0.5,
+#          "weighting":'uniform',
+          "psfmode": 'clark',
+          "imagermode": 'csclean',
+          }
+
+    clean_iter = 500
+    clean_n_sigma = 3
+    sourcefinding_sigma = 5.5
+    mask_ap_radius_degrees = 60./3600
+    rain_min, rain_max = 0.8, 1.2
+
+    max_recleans = 3
+    max_acceptable_delta = 0.05
+
+
+    ##=============================================================
+
     logger = logging.getLogger()
     print "Processing all_obs in:", listings_file
     all_obs = utils.load_listings(listings_file)
@@ -85,22 +109,19 @@ def reduce_listings(listings_file, output_dir, monitor_coords,
 
         #Filter those obs with extreme rain values
         good_obs, rejected = subs.reject_bad_obs(groups[group_name],
-                                                 rain_min=0.8, rain_max=1.2)
+                                                 rain_min, rain_max)
 
         #Import UVFITs to MS, concatenate, make dirty maps
         script, concat_ob = subs.import_and_concatenate(good_obs,
                                                          casa_output_dir)
-        script.extend(subs.clean_and_export_fits(concat_ob,
-                                                 casa_output_dir,
-                                                 fits_output_dir,
-                                                 threshold=1,
-                                                 niter=0))
-        for obs in good_obs:
+        for obs in good_obs+[concat_ob]:
             script.extend(subs.clean_and_export_fits(obs,
-                                                     casa_output_dir,
-                                                     fits_output_dir,
-                                                     threshold=1,
-                                                     niter=0))
+                                             casa_output_dir,
+                                             fits_output_dir,
+                                             threshold=1,
+                                             niter=0,
+                                             mask='',
+                                             other_clean_args=ami_clean_args))
 
         # Ok, run what we have so far:
         logger.info("Concatenating, making dirty maps...")
@@ -121,15 +142,17 @@ def reduce_listings(listings_file, output_dir, monitor_coords,
 
         logger.info("Performing open clean on concat image...")
         script = subs.clean_and_export_fits(concat_ob,
-                                            casa_output_dir, fits_output_dir,
-                                            threshold=concat_ob.rms_dirty*3)
+                                casa_output_dir, fits_output_dir,
+                                threshold=concat_ob.rms_dirty*clean_n_sigma,
+                                niter=clean_iter,
+                                mask='',
+                                other_clean_args=ami_clean_args)
         casa_out, errors = casa.run_script(script, raise_on_severe=True)
 
 
-        max_recleans = 3
-        max_acceptable_delta = 0.05
-        reclean_iter = 0
+
         # Do open clean for each epoch:
+        reclean_iter = 0
         while reclean_iter < max_recleans:
             logging.info("Reclean cycle %s", reclean_iter)
             reclean_iter+=1
@@ -142,8 +165,8 @@ def reduce_listings(listings_file, output_dir, monitor_coords,
                 assert isinstance(obs, ObsInfo)
                 script.extend(
                     subs.clean_and_export_fits(obs,
-                                               casa_output_dir, fits_output_dir,
-                                               threshold=obs.rms_best*3))
+                                           casa_output_dir, fits_output_dir,
+                                           threshold=obs.rms_best*clean_n_sigma))
             logger.info("Running open cleans (may take a while)...")
             casa_out, errors = casa.run_script(script, raise_on_severe=True)
 
@@ -171,9 +194,9 @@ def reduce_listings(listings_file, output_dir, monitor_coords,
             regionfile.write(utils.fk5_ellipse_regions_from_extractedsources(sources))
 
         mask, mask_apertures = utils.generate_mask(
-            aperture_radius_degrees=60./3600,
+            aperture_radius_degrees=mask_ap_radius_degrees,
             extracted_sources=sources,
-            extracted_source_sigma_thresh=5.5,
+            extracted_source_sigma_thresh=sourcefinding_sigma,
             monitoring_coords=monitor_coords,
             regionfile_path=os.path.join(fits_output_dir, 'mask_aps.reg')
         )
@@ -188,8 +211,10 @@ def reduce_listings(listings_file, output_dir, monitor_coords,
                 script.extend(
                   subs.clean_and_export_fits(obs,
                                            casa_output_dir, fits_output_dir,
+                                           threshold=obs.rms_best*clean_n_sigma,
+                                           niter=clean_iter,
                                            mask=mask,
-                                           threshold=obs.rms_best*3))
+                                           other_clean_args=ami_clean_args))
 
 
             logger.info("Running masked cleans on all images in group (may take a while)...")
