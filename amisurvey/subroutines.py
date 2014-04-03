@@ -9,7 +9,6 @@ import logging
 
 from driveami import keys as meta_keys
 import drivecasa
-from amisurvey import default_ami_clean_args
 from amisurvey.obsinfo import ObsInfo, CleanMaps
 import amisurvey.utils as utils
 import amisurvey.sigmaclip

@@ -165,8 +165,12 @@ def reduce_listings(listings_file, output_dir, monitor_coords,
                 assert isinstance(obs, ObsInfo)
                 script.extend(
                     subs.clean_and_export_fits(obs,
-                                           casa_output_dir, fits_output_dir,
-                                           threshold=obs.rms_best*clean_n_sigma))
+                                   casa_output_dir, fits_output_dir,
+                                   threshold=obs.rms_best*clean_n_sigma,
+                                   niter=clean_iter,
+                                   mask='',
+                                   other_clean_args=ami_clean_args
+                                    ))
             logger.info("Running open cleans (may take a while)...")
             casa_out, errors = casa.run_script(script, raise_on_severe=True)
 
