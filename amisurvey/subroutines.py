@@ -140,8 +140,8 @@ def clean_and_export_fits(obs_info,
 
 
 def run_sourcefinder(path_to_fits_image,
-                      detection_thresh=5,
-                      analysis_thresh=3,
+                      detection_thresh,
+                      analysis_thresh,
                       back_size=64,
                       margin=128,
                       radius=0,
@@ -164,3 +164,51 @@ def run_sourcefinder(path_to_fits_image,
 def get_image_rms_estimate(path_to_casa_image):
     map = utils.load_casa_imagedata(path_to_casa_image)
     return amisurvey.sigmaclip.rms_with_clipped_subregion(map, sigma=3, f=3)
+
+def iterative_clean(obs,
+                    clean_iter,
+                    mask,
+                    rms_threshold_multiple,
+                    other_clean_args,
+                    max_acceptable_rms_delta,
+                    max_recleans,
+                    casa_output_dir, fits_output_dir,
+                    casa_instance):
+    assert isinstance(obs, ObsInfo)
+    casa = casa_instance
+
+    logging.info("Iteratively cleaning %s", obs.name)
+    # Always run first clean:
+    reclean_iter = 0
+    obs.rms_delta = float('inf')
+    while (reclean_iter < max_recleans and
+                   obs.rms_delta > max_acceptable_rms_delta):
+        logging.debug("Reclean cycle %s", reclean_iter)
+        reclean_iter+=1
+        script = []
+
+        script.extend(
+            clean_and_export_fits(obs,
+                           casa_output_dir, fits_output_dir,
+                           threshold=obs.rms_best*rms_threshold_multiple,
+                           niter=clean_iter,
+                           mask=mask,
+                           other_clean_args=other_clean_args
+                            ))
+        casa_out, errors = casa.run_script(script, raise_on_severe=True)
+
+        # Get new estimate of RMS for each map:
+        logger.debug("Re-estimating RMS...")
+        if not mask:
+            map = obs.maps_open.ms.residual
+        else:
+            map = obs.maps_masked.ms.residual
+        new_rms = get_image_rms_estimate(map)
+        obs.rms_delta = (obs.rms_best - new_rms ) / obs.rms_best
+        logger.debug("%s; RMS est, old: %s, new:%s, delta:%s",
+                     obs.name, obs.rms_best, new_rms, obs.rms_delta)
+        obs.rms_best=new_rms
+        if (obs.rms_delta<0):
+            logger.warn("%s RMS *increased* after clean, delta: %s",
+                        obs.name, obs.rms_delta)
+    return

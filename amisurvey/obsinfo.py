@@ -49,7 +49,7 @@ class ObsInfo(object):
         self.maps_masked = ObsInfo.MsFits()
         self.rms_dirty=None
         self.rms_best=None
-        self.rms_delta=float('inf')
+        self.rms_delta=None
 
     @staticmethod
     def from_processed_ami_info(ami_info_dict):

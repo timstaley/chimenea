@@ -74,20 +74,26 @@ def reduce_listings(listings_file, output_dir, monitor_coords,
           "imagermode": 'csclean',
           }
 
+    rain_min, rain_max = 0.8, 1.2
+
     clean_iter = 500
     clean_n_sigma = 3
-    sourcefinding_sigma = 5.5
-    mask_ap_radius_degrees = 60./3600
-    rain_min, rain_max = 0.8, 1.2
 
     max_recleans = 3
     max_acceptable_delta = 0.05
+
+    sourcefinder_detect, sourcefinder_analysis = 5.0,3.0
+
+    mask_source_sigma = 5.5
+    mask_ap_radius_degrees = 60./3600
+
+
 
 
     ##=============================================================
 
     logger = logging.getLogger()
-    print "Processing all_obs in:", listings_file
+    logger.info( "Processing all_obs in: %s", listings_file)
     all_obs = utils.load_listings(listings_file)
     groups = utils.get_grouped_file_listings(all_obs)
     output_preamble_to_log(groups)
@@ -124,7 +130,7 @@ def reduce_listings(listings_file, output_dir, monitor_coords,
                                              other_clean_args=ami_clean_args))
 
         # Ok, run what we have so far:
-        logger.info("Concatenating, making dirty maps...")
+        logger.info("*** Concatenating and making dirty maps ***")
         casa_out, errors = casa.run_script(script, raise_on_severe=True)
         if errors:
             logger.warning("Got the following errors (probably all ok)")
@@ -132,7 +138,7 @@ def reduce_listings(listings_file, output_dir, monitor_coords,
                 logger.warning(e)
 
         # Now we can grab an estimate of the RMS for each map:
-        logger.info("Initial estimate of RMS from dirty map...")
+        logger.info("*** Getting initial estimates of RMS from dirty maps ***")
         for obs in good_obs+[concat_ob]:
             dmap = obs.maps_dirty.ms.image
             obs.rms_dirty= subs.get_image_rms_estimate(dmap)
@@ -140,59 +146,26 @@ def reduce_listings(listings_file, output_dir, monitor_coords,
             logger.debug("%s; dirty map RMS est: %s", obs.name, obs.rms_dirty)
 
 
-        logger.info("Performing open clean on concat image...")
-        script = subs.clean_and_export_fits(concat_ob,
-                                casa_output_dir, fits_output_dir,
-                                threshold=concat_ob.rms_dirty*clean_n_sigma,
-                                niter=clean_iter,
-                                mask='',
-                                other_clean_args=ami_clean_args)
-        casa_out, errors = casa.run_script(script, raise_on_severe=True)
-
-
-
-        # Do open clean for each epoch:
-        reclean_iter = 0
-        while reclean_iter < max_recleans:
-            logging.info("Reclean cycle %s", reclean_iter)
-            reclean_iter+=1
-
-            obs_to_be_recleaned=[ obs for obs in good_obs + [concat_ob]
-                                  if obs.rms_delta > max_acceptable_delta]
-
-            script = []
-            for obs in obs_to_be_recleaned:
-                assert isinstance(obs, ObsInfo)
-                script.extend(
-                    subs.clean_and_export_fits(obs,
-                                   casa_output_dir, fits_output_dir,
-                                   threshold=obs.rms_best*clean_n_sigma,
-                                   niter=clean_iter,
-                                   mask='',
-                                   other_clean_args=ami_clean_args
-                                    ))
-            logger.info("Running open cleans (may take a while)...")
-            casa_out, errors = casa.run_script(script, raise_on_severe=True)
-
-            # Get new estimate of RMS for each map:
-            logger.info("Re-estimating RMS's...")
-            for obs in obs_to_be_recleaned:
-                map = obs.maps_open.ms.image
-                new_rms = subs.get_image_rms_estimate(map)
-                obs.rms_delta = (obs.rms_best - new_rms ) / obs.rms_best
-                logger.debug("%s; RMS est, old: %s, new:%s, delta:%s",
-                             obs.name, obs.rms_best, new_rms, obs.rms_delta)
-                obs.rms_best=new_rms
-                if (obs.rms_delta<0):
-                    logger.warn("%s RMS *increased* after clean, delta: %s",
-                                obs.name, obs.rms_delta)
-
-
+        logger.info("*** Performing iterative open clean on concat image ***")
+        # Do iterative open clean on concat vis to create deep image:
+        subs.iterative_clean(concat_ob,
+                             clean_iter=clean_iter,
+                             mask='',
+                             rms_threshold_multiple=clean_n_sigma,
+                             other_clean_args=ami_clean_args,
+                             max_acceptable_rms_delta=max_acceptable_delta,
+                             max_recleans=max_recleans,
+                             casa_output_dir=casa_output_dir,
+                             fits_output_dir=fits_output_dir,
+                             casa_instance=casa)
 
         # Perform sourcefinding on the open-clean concat map,to try and create a
         # deep source catalogue. Use it to determine mask:
         logger.info("Sourcefinding on concat image...")
-        sources = subs.run_sourcefinder(concat_ob.maps_open.fits.image)
+        sources = subs.run_sourcefinder(concat_ob.maps_open.fits.image,
+                                        detection_thresh=sourcefinder_detect,
+                                        analysis_thresh=sourcefinder_analysis
+                                        )
 
         with open(os.path.join(fits_output_dir, 'extracted_sources.reg'), 'w') as regionfile:
             regionfile.write(utils.fk5_ellipse_regions_from_extractedsources(sources))
@@ -200,7 +173,7 @@ def reduce_listings(listings_file, output_dir, monitor_coords,
         mask, mask_apertures = utils.generate_mask(
             aperture_radius_degrees=mask_ap_radius_degrees,
             extracted_sources=sources,
-            extracted_source_sigma_thresh=sourcefinding_sigma,
+            extracted_source_sigma_thresh=mask_source_sigma,
             monitoring_coords=monitor_coords,
             regionfile_path=os.path.join(fits_output_dir, 'mask_aps.reg')
         )
@@ -208,22 +181,37 @@ def reduce_listings(listings_file, output_dir, monitor_coords,
         logger.info("Generated mask:\n" + mask)
 
 
-        # Finally, run masked cleans on epochal and concatenated obs:
-        script = []
+        # Assuming mask valid, i.e. not an empty field:
+        # Run iterative masked cleans on epochal obs, and get updated RMS est:
+        logger.info("*** Running masked clean on each epoch ***")
         if len(mask_apertures):
-            for obs in good_obs + [concat_ob]:
-                script.extend(
-                  subs.clean_and_export_fits(obs,
-                                           casa_output_dir, fits_output_dir,
-                                           threshold=obs.rms_best*clean_n_sigma,
-                                           niter=clean_iter,
-                                           mask=mask,
-                                           other_clean_args=ami_clean_args))
+            for obs in good_obs:
+                subs.iterative_clean(obs,
+                                     clean_iter=clean_iter,
+                                     mask=mask,
+                                     rms_threshold_multiple=clean_n_sigma,
+                                     other_clean_args=ami_clean_args,
+                                     max_acceptable_rms_delta=max_acceptable_delta,
+                                     max_recleans=max_recleans,
+                                     casa_output_dir=casa_output_dir,
+                                     fits_output_dir=fits_output_dir,
+                                     casa_instance=casa)
 
+        # Finally, run a single open-clean on each epoch, to the RMS limit
+        # determined from the masked clean.
+        logger.info("*** Running open clean on each epoch ***")
+        script=[]
+        for obs in good_obs:
+            script.extend(
+                subs.clean_and_export_fits(obs,
+                                       casa_output_dir,fits_output_dir,
+                                       threshold=clean_n_sigma*obs.rms_best,
+                                       niter=clean_iter,
+                                       mask='',
+                                       other_clean_args=ami_clean_args
+            ))
+        casa_out, errors = casa.run_script(script, raise_on_severe=True)
 
-            logger.info("Running masked cleans on all images in group (may take a while)...")
-            casa_out, errors = casa.run_script(script, raise_on_severe=True)
-            logger.info("Done!")
     return groups
 
 
