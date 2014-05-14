@@ -184,8 +184,13 @@ def reduce_listings(listings_file, output_dir, monitor_coords,
         # Assuming mask valid, i.e. not an empty field:
         # Run iterative masked cleans on epochal obs, and get updated RMS est:
         logger.info("*** Running masked clean on each epoch ***")
+
+        # Reset the concat_ob best rms estimate to that of dirty map,
+        # to avoid over-cleaning.
+        concat_ob.rms_best = concat_ob.rms_dirty
+
         if len(mask_apertures):
-            for obs in good_obs:
+            for obs in good_obs+[concat_ob]:
                 subs.iterative_clean(obs,
                                      clean_iter=clean_iter,
                                      mask=mask,
