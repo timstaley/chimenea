@@ -146,19 +146,21 @@ def run_sourcefinder(path_to_fits_image,
                       margin=128,
                       radius=0,
                       ):
-    sf_config = {
-        "back_sizex": back_size,
-        "back_sizey": back_size,
+    image_config = {
+        "back_size_x": back_size,
+        "back_size_y": back_size,
         "margin": margin,
         "radius": radius,
-        "deblend": True,
-        "deblend_nthresh": 32,
-        "force_beam": False
         }
 
+    deblend_nthresh= 32,
+    force_beam= False
+
     sfimg = sourcefinder_image_from_accessor(FitsImage(path_to_fits_image),
-                                             **sf_config)
-    results = sfimg.extract(detection_thresh, analysis_thresh)
+                                             **image_config)
+    results = sfimg.extract(detection_thresh, analysis_thresh,
+                            deblend_nthresh=deblend_nthresh,
+                            force_beam=force_beam)
     return results
 
 def get_image_rms_estimate(path_to_casa_image):
@@ -195,7 +197,7 @@ def iterative_clean(obs,
                            mask=mask,
                            other_clean_args=other_clean_args
                             ))
-        casa_out, errors = casa.run_script(script, raise_on_severe=True)
+        casa_out, errors = casa.run_script(script, raise_on_severe=False)
 
         # Get new estimate of RMS for each map:
         logger.debug("Re-estimating RMS...")
