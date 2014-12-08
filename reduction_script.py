@@ -10,9 +10,9 @@ import datetime
 from driveami import keys as meta_keys
 import drivecasa
 
-from amisurvey.obsinfo import ObsInfo
-import amisurvey.subroutines as subs
-import amisurvey.utils as utils
+from chimenea.obsinfo import ObsInfo
+import chimenea.subroutines as subs
+import chimenea.utils as utils
 
 def handle_args():
     """
@@ -272,12 +272,12 @@ def output_preamble_to_log(groups):
     for key in sorted(groups.keys()):
         logger.info("%s:", key)
 
-        pointings = [f.meta[meta_keys.pointing_fk5] for f in groups[key] ]
+        pointings = [f.meta[meta_keys.pointing_degrees] for f in groups[key] ]
         pointings = set((i[0], i[1]) for i in pointings)
         logger.info("%s different pointings:" % len(pointings))
         logger.info(str(pointings))
         for f in groups[key]:
-            pointing = f.meta[meta_keys.pointing_fk5]
+            pointing = f.meta[meta_keys.pointing_degrees]
             ra, dec = pointing[0], pointing[1]
             logger.info("\t %s,  (%.4f,%.4f)", f.name.ljust(24), ra, dec),
         logger.info("--------------------------------")
