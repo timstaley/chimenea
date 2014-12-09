@@ -1,5 +1,5 @@
 import numpy as np
-import amisurvey.utils as utils
+import chimenea.utils as utils
 import pyrap
 import pyrap.images
 

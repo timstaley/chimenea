@@ -1,2 +1,6 @@
 simplejson
 drive-casa
+
+## Require manual installation:
+#drive-ami
+#tkp

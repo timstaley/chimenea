@@ -9,9 +9,9 @@ import logging
 
 from driveami import keys as meta_keys
 import drivecasa
-from amisurvey.obsinfo import ObsInfo, CleanMaps
-import amisurvey.utils as utils
-import amisurvey.sigmaclip
+from chimenea.obsinfo import ObsInfo, CleanMaps
+import chimenea.utils as utils
+import chimenea.sigmaclip
 from tkp.accessors import sourcefinder_image_from_accessor
 from tkp.accessors import FitsImage
 from tkp.sourcefinder.utils import generate_result_maps
@@ -165,7 +165,7 @@ def run_sourcefinder(path_to_fits_image,
 
 def get_image_rms_estimate(path_to_casa_image):
     map = utils.load_casa_imagedata(path_to_casa_image)
-    return amisurvey.sigmaclip.rms_with_clipped_subregion(map, sigma=3, f=3)
+    return chimenea.sigmaclip.rms_with_clipped_subregion(map, sigma=3, f=3)
 
 def iterative_clean(obs,
                     clean_iter,

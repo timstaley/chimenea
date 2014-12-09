@@ -39,7 +39,6 @@ class ObsInfo(object):
     def __init__(self, name, group, metadata, uvfits=None):
         #Typically contains the metadata from a processed AMI rawfile:
         self.meta = metadata
-
         self.name = name
         self.group = group
         self.uv_fits = uvfits

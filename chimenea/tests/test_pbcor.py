@@ -1,7 +1,7 @@
 from __future__ import absolute_import
 from unittest import TestCase
 import numpy as np
-import amisurvey.pbcor as pbcor
+import chimenea.pbcor as pbcor
 
 class TestRadiusMap(TestCase):
     def test_radius_from_origin(self):

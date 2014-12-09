@@ -9,7 +9,7 @@ from collections import namedtuple
 import logging
 import simplejson as json
 import pyrap.tables
-from amisurvey.obsinfo import ObsInfo
+from chimenea.obsinfo import ObsInfo
 from driveami import keys as meta_keys
 import drivecasa
 logger = logging.getLogger()
