@@ -94,6 +94,7 @@ def reduce_listings(listings_file, output_dir, monitor_coords,
 
     logger = logging.getLogger()
     logger.info( "Processing all_obs in: %s", listings_file)
+
     all_obs = utils.load_listings(listings_file)
     groups = utils.get_grouped_file_listings(all_obs)
     output_preamble_to_log(groups)
@@ -103,14 +104,17 @@ def reduce_listings(listings_file, output_dir, monitor_coords,
         grp_dir = os.path.join(os.path.expanduser(output_dir), str(group_name))
         casa_output_dir = os.path.join(grp_dir, 'casa')
         fits_output_dir = os.path.join(grp_dir, 'images')
-
         casa_logfile = os.path.join(casa_output_dir,
-                            ''.join(('casalog_',reduction_timestamp,'.txt')))
-        casa = drivecasa.Casapy(working_dir=casa_output_dir,
-                                casa_logfile=casa_logfile)
+                            'casalog_{}.txt'.format(reduction_timestamp))
+        commands_logfile = os.path.join(casa_output_dir,
+                             'casa_commands_{}.txt'.format(reduction_timestamp))
+        casa = drivecasa.Casapy(casa_logfile=casa_logfile,
+                                commands_logfile=commands_logfile,
+                                working_dir=casa_output_dir,)
 
         logger.info("Processing %s", group_name)
-        logger.info("CASA Logfile at: %s",casa_logfile)
+        logger.info("CASA lLogfile at: %s",casa_logfile)
+        logger.info("Commands logfile at: %s",commands_logfile)
 
 
         #Filter those obs with extreme rain values
@@ -131,7 +135,7 @@ def reduce_listings(listings_file, output_dir, monitor_coords,
 
         # Ok, run what we have so far:
         logger.info("*** Concatenating and making dirty maps ***")
-        casa_out, errors = casa.run_script(script, raise_on_severe=True)
+        casa_out, errors = casa.run_script(script, raise_on_severe=False)
         if errors:
             logger.warning("Got the following errors (probably all ok)")
             for e in errors:
@@ -215,7 +219,7 @@ def reduce_listings(listings_file, output_dir, monitor_coords,
                                        mask='',
                                        other_clean_args=ami_clean_args
             ))
-        casa_out, errors = casa.run_script(script, raise_on_severe=True)
+        casa_out, errors = casa.run_script(script, raise_on_severe=False)
 
     return groups
 
@@ -228,7 +232,7 @@ def setup_logging(reduction_timestamp):
     """
     Set up basic (INFO level) and debug logfiles
     """
-    log_filename = 'amisurvey_log_'+reduction_timestamp
+    log_filename = 'chimenea_log_'+reduction_timestamp
     date_fmt = "%y-%m-%d (%a) %H:%M:%S"
 
     std_formatter = logging.Formatter('%(asctime)s:%(levelname)s:%(message)s',
