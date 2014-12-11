@@ -10,7 +10,7 @@ import logging
 import simplejson as json
 import pyrap.tables
 from chimenea.obsinfo import ObsInfo
-from driveami import keys as meta_keys
+import chimenea.config
 import drivecasa
 logger = logging.getLogger()
 
@@ -110,25 +110,26 @@ def get_grouped_file_listings(all_obs):
         groups_dict[g_name] = grp
     return groups_dict
 
-def generate_mask(aperture_radius_degrees,
+def generate_mask(chimconfig,
                   extracted_sources=None,
-                  extracted_source_sigma_thresh = 5.5,
                   monitoring_coords=None,
                   regionfile_path=None
                   ):
-
+    assert  isinstance(chimconfig, chimenea.config.ChimConfig)
+    conf=chimconfig
     masked_sources = [s for s in extracted_sources
-                      if s.sig > extracted_source_sigma_thresh]
+                      if s.sig > chimconfig.mask_source_sigma ]
     mask_apertures = []
     for ms in masked_sources:
         mask_apertures.append(
             MaskAp(ra = ms.ra.value,
                    dec = ms.dec.value,
-                   radius_deg=aperture_radius_degrees))
+                   radius_deg=conf.mask_ap_radius_degrees))
     if monitoring_coords:
         for mc in monitoring_coords:
             mask_apertures.append(
-                MaskAp(ra=mc[0], dec=mc[1], radius_deg=aperture_radius_degrees))
+                MaskAp(ra=mc[0], dec=mc[1],
+                       radius_deg=conf.mask_ap_radius_degrees))
 
     if regionfile_path is not None:
         with open(regionfile_path, 'w') as regionfile:
@@ -136,7 +137,8 @@ def generate_mask(aperture_radius_degrees,
 
     mask_coords = [(str(s.ra) + 'deg', str(s.dec) + 'deg')
                        for s in mask_apertures]
-    mask = drivecasa.utils.get_circular_mask_string(mask_coords,
-                         aperture_radius=str(aperture_radius_degrees) + "deg")
+    mask = drivecasa.utils.get_circular_mask_string(
+        mask_coords,
+        aperture_radius=str(conf.mask_ap_radius_degrees) + "deg")
 
     return mask, mask_apertures

@@ -1,5 +1,6 @@
 simplejson
-drive-casa
+drive-casa>=0.6
+colorlog
 
 ## Require manual installation:
 #drive-ami

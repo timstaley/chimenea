@@ -12,6 +12,7 @@ import drivecasa
 from chimenea.obsinfo import ObsInfo, CleanMaps
 import chimenea.utils as utils
 import chimenea.sigmaclip
+import chimenea.config
 from tkp.accessors import sourcefinder_image_from_accessor
 from tkp.accessors import FitsImage
 from tkp.sourcefinder.utils import generate_result_maps
@@ -19,26 +20,7 @@ import tkp.bin.pyse
 
 logger = logging.getLogger(__name__)
 
-def reject_bad_obs(obs_list, rain_min, rain_max):
-    """
-    Run quality control on a list of ObsInfo.
 
-    Currently just filters on rain gauge values.
-
-    Returns 2 lists: [passed],[failed]
-    """
-
-    good_files = []
-    rain_rejected = []
-    for obs in obs_list:
-        rain_amp_mod = obs.meta[meta_keys.rain]
-        if (rain_amp_mod > rain_min and rain_amp_mod < rain_max):
-            good_files.append(obs)
-        else:
-            rain_rejected.append(obs)
-            logger.info("Rejected file %s due to rain value %s" %
-                        (obs.name,rain_amp_mod))
-    return good_files, rain_rejected
 
 def import_and_concatenate(obs_list, casa_output_dir):
     """
@@ -140,27 +122,22 @@ def clean_and_export_fits(obs_info,
 
 
 def run_sourcefinder(path_to_fits_image,
-                      detection_thresh,
-                      analysis_thresh,
-                      back_size=64,
-                      margin=128,
-                      radius=0,
+                     sourcefinder_config
                       ):
-    image_config = {
-        "back_size_x": back_size,
-        "back_size_y": back_size,
-        "margin": margin,
-        "radius": radius,
-        }
 
-    deblend_nthresh= 32,
-    force_beam= False
+    sfconf = sourcefinder_config
+    image_config = {
+        "back_size_x": sfconf.back_size,
+        "back_size_y": sfconf.back_size,
+        "margin": sfconf.margin,
+        "radius": sfconf.radius,
+        }
 
     sfimg = sourcefinder_image_from_accessor(FitsImage(path_to_fits_image),
                                              **image_config)
-    results = sfimg.extract(detection_thresh, analysis_thresh,
-                            deblend_nthresh=deblend_nthresh,
-                            force_beam=force_beam)
+    results = sfimg.extract(sfconf.detection_thresh, sfconf.analysis_thresh,
+                            deblend_nthresh=sfconf.deblend_nthresh,
+                            force_beam=sfconf.force_beam)
     return results
 
 def get_image_rms_estimate(path_to_casa_image):
@@ -168,23 +145,21 @@ def get_image_rms_estimate(path_to_casa_image):
     return chimenea.sigmaclip.rms_with_clipped_subregion(map, sigma=3, f=3)
 
 def iterative_clean(obs,
-                    clean_iter,
+                    chimconfig,
                     mask,
-                    rms_threshold_multiple,
-                    other_clean_args,
-                    max_acceptable_rms_delta,
-                    max_recleans,
-                    casa_output_dir, fits_output_dir,
+                    casa_output_dir,
+                    fits_output_dir,
                     casa_instance):
     assert isinstance(obs, ObsInfo)
+    assert isinstance(chimconfig, chimenea.config.ChimConfig)
     casa = casa_instance
 
     logging.info("Iteratively cleaning %s", obs.name)
     # Always run first clean:
     reclean_iter = 0
     obs.rms_delta = float('inf')
-    while (reclean_iter < max_recleans and
-                   obs.rms_delta > max_acceptable_rms_delta):
+    while (reclean_iter < chimconfig.max_recleans and
+                   obs.rms_delta > chimconfig.reclean_rms_convergence):
         logging.debug("Reclean cycle %s", reclean_iter)
         reclean_iter+=1
         script = []
@@ -192,10 +167,10 @@ def iterative_clean(obs,
         script.extend(
             clean_and_export_fits(obs,
                            casa_output_dir, fits_output_dir,
-                           threshold=obs.rms_best*rms_threshold_multiple,
-                           niter=clean_iter,
+                           threshold=obs.rms_best*chimconfig.clean.sigma_threshold,
+                           niter=chimconfig.clean.niter,
                            mask=mask,
-                           other_clean_args=other_clean_args
+                           other_clean_args=chimconfig.clean.other_args
                             ))
         casa_out, errors = casa.run_script(script, raise_on_severe=False)
 
