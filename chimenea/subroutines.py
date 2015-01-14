@@ -7,7 +7,6 @@ Some scientifically important arguments are encoded as the defaults here.
 import os
 import logging
 
-from driveami import keys as meta_keys
 import drivecasa
 from chimenea.obsinfo import ObsInfo, CleanMaps
 import chimenea.utils as utils
@@ -15,8 +14,6 @@ import chimenea.sigmaclip
 import chimenea.config
 from tkp.accessors import sourcefinder_image_from_accessor
 from tkp.accessors import FitsImage
-from tkp.sourcefinder.utils import generate_result_maps
-import tkp.bin.pyse
 
 logger = logging.getLogger(__name__)
 

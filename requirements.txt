@@ -1,7 +1,4 @@
 simplejson
 drive-casa>=0.6
-colorlog
+tkp==2.0.0
 
-## Require manual installation:
-#drive-ami
-#tkp

@@ -50,13 +50,3 @@ class ObsInfo(object):
         self.rms_best=None
         self.rms_delta=None
 
-    @staticmethod
-    def from_processed_ami_info(ami_info_dict):
-        """
-        Load the relevant attributes from a dict of AMI-dataset metadata.
-        """
-        d = ami_info_dict
-        return ObsInfo(name = d[meta_keys.obs_name],
-                       group= d[meta_keys.group_name],
-                       metadata=d,
-                       uvfits=d[meta_keys.target_uvfits])
