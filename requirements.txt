@@ -1,4 +1,0 @@
-simplejson
-drive-casa>=0.6
-tkp==2.0.0
-
