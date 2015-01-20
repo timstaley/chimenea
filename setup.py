@@ -2,8 +2,12 @@
 
 from setuptools import setup
 
-with open('requirements.txt') as f:
-    required = f.read().splitlines()
+
+requirements = ['simplejson',
+                'drive-casa>=0.6',
+                'tkp>=2.0,<3'
+]
+
 
 setup(
     name="chimenea",
@@ -13,5 +17,5 @@ setup(
     author="Tim Staley",
     author_email="timstaley337@gmail.com",
     url="https://github.com/timstaley/chimenea",
-    install_requires=required,
+    install_requires=requirements,
 )

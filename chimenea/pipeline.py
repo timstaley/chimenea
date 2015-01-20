@@ -15,7 +15,6 @@ def process_observation_group(obs_list,
                               fits_output_dir,
                               casa_instance):
 
-    logger.info("*** Concatenating and making dirty maps ***")
     # Import UVFITs to MS, concatenate
     script, concat_ob = subs.import_and_concatenate(obs_list,
                                                      casa_output_dir)
@@ -32,6 +31,8 @@ def process_observation_group(obs_list,
             niter=0,
             mask='',
             other_clean_args=chimconfig.clean.other_args))
+
+    logger.info("*** Concatenating and making dirty maps ***")
     casa_out, errors = casa_instance.run_script(script, raise_on_severe=False)
     if errors:
         logger.warning("Got the following errors (probably all ok)")
