@@ -169,7 +169,7 @@ def iterative_clean(obs,
                            mask=mask,
                            other_clean_args=chimconfig.clean.other_args
                             ))
-        casa_out, errors = casa.run_script(script, raise_on_severe=False)
+        casa_out, errors = casa.run_script(script, raise_on_severe=True)
 
         # Get new estimate of RMS for each map:
         logger.debug("Re-estimating RMS...")

@@ -33,7 +33,7 @@ def process_observation_group(obs_list,
             other_clean_args=chimconfig.clean.other_args))
 
     logger.info("*** Concatenating and making dirty maps ***")
-    casa_out, errors = casa_instance.run_script(script, raise_on_severe=False)
+    casa_out, errors = casa_instance.run_script(script, raise_on_severe=True)
     if errors:
         logger.warning("Got the following errors (probably all ok)")
         for e in errors:
@@ -106,6 +106,6 @@ def process_observation_group(obs_list,
                 mask='',
                 other_clean_args=chimconfig.clean.other_args
             ))
-    casa_out, errors = casa_instance.run_script(script, raise_on_severe=False)
+    casa_out, errors = casa_instance.run_script(script, raise_on_severe=True)
     return obs_list, concat_ob
 
