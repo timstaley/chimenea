@@ -9,13 +9,15 @@ class CleanMaps(object):
     Just a bag of attributes, representing data-products from Clean.
     """
     def __init__(self, image=None, model=None, residual=None, psf=None,
-                 mask=None, flux=None):
+                 mask=None, flux=None, pbcor=None):
         self.image = image
         self.model = model
         self.residual = residual
         self.psf = psf
         self.mask = mask
         self.flux = flux
+        self.pbcor = pbcor
+
 
 
 class ObsInfo(object):
