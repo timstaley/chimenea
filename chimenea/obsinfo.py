@@ -1,8 +1,7 @@
 """
 Defines the ObsInfo class and its component members.
 """
-
-from driveami import keys as meta_keys
+import json
 
 class CleanMaps(object):
     """
@@ -38,6 +37,7 @@ class ObsInfo(object):
             self.ms = CleanMaps()
             self.fits = CleanMaps()
 
+
     def __init__(self, name, group, metadata, uvfits=None):
         #Typically contains the metadata from a processed AMI rawfile:
         self.meta = metadata
@@ -51,4 +51,39 @@ class ObsInfo(object):
         self.rms_dirty=None
         self.rms_best=None
         self.rms_delta=None
+
+    def __repr__(self):
+        return json.dumps(self, cls=ObsInfo.Encoder, indent=4, sort_keys=True)
+
+
+    class Encoder(json.JSONEncoder):
+        def default(self,obj):
+            for someclass in serializable:
+                if isinstance(obj, someclass):
+                    return {someclass.__name__:obj.__dict__}
+            return json.JSONEncoder.default(self,obj)
+
+
+    class Decoder(json.JSONDecoder):
+        def __init__(self, **kwargs):
+            # super(ObsInfo.Decoder, self).__init__(object_hook=self.as_obsinfo,
+            #                                       **kwargs)
+            json.JSONDecoder.__init__(self, object_hook=self.as_obsinfo,
+                                      **kwargs)
+
+        @staticmethod
+        def as_obsinfo(dct):
+            for someclass in serializable:
+                if someclass.__name__ in dct:
+                    o = someclass.__new__(someclass)
+                    o.__dict__.update(dct[someclass.__name__])
+                    return o
+            return dct
+
+serializable = [ObsInfo,ObsInfo.MsFits,CleanMaps]
+
+
+
+
+
 
