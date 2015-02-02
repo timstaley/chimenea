@@ -32,18 +32,18 @@ class TestCorrectionMap(TestCase):
         # centre = (6,6)
         shape = (3,3)
         centre = (1,1)
-        curve = pbcor.GaussianCurve(sigma=1.)
-        map = pbcor._correction_map(curve.correction,
+        curve = lambda radius_pix: np.exp( -(radius_pix)**2 / 2.)
+        map = pbcor._correction_map(curve,
                                     shape,centre)
 
         self.assertEqual(map[centre], 1.0)
-        self.assertEqual(map[0][centre[1]], curve.correction(1))
+        self.assertEqual(map[0][centre[1]], curve(1))
 
 class TestMask(TestCase):
     def test_gaussian(self):
         shape = (13,13)
         centre = (6,6)
 
-        mask = pbcor.make_mask(shape,centre,radius_pix=1)
-        print "MASK:"
-        print mask
+        mask = pbcor.make_mask(shape,centre,cutoff_radius_pix=1)
+        # print "MASK:"
+        # print mask
