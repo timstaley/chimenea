@@ -4,8 +4,6 @@ import os
 import chimenea
 from chimenea import utils
 import chimenea.subroutines as subs
-import chimenea.pbcor as pbcor
-from chimenea.obsinfo import ObsInfo
 import logging
 
 logger = logging.getLogger(__name__)
@@ -112,12 +110,13 @@ def process_observation_group(obs_list,
 
     if chimconfig.pb_curve:
         logger.info("*** Applying primary beam correction ***")
+        pb_exportfits_script = []
         for obs in obs_list+[concat_ob]:
-            pbcor.apply_pb_correction(obs,
-                                      chimconfig.pb_curve,
-                                      chimconfig.pb_cutoff)
-
-
+                subs.apply_primary_beam_correction(
+                    obs,
+                    chimconfig,
+                    casa_script=pb_exportfits_script)
+        casa_instance.run_script(pb_exportfits_script)
 
     return obs_list, concat_ob
 

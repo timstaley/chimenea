@@ -124,6 +124,7 @@ def apply_pb_correction(obs,
         pb_img_path = img_path+'.pbcor'
         generate_pb_corrected_image(img_path, pb_img_path,
                                     pbmap)
+        clean_maps.pbcor = pb_img_path
 
     if obs.maps_masked.ms.image:
         process_clean_maps(obs.maps_masked.ms)

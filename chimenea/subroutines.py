@@ -12,6 +12,7 @@ from chimenea.obsinfo import ObsInfo, CleanMaps
 import chimenea.utils as utils
 import chimenea.sigmaclip
 import chimenea.config
+import chimenea.pbcor as pbcor
 from tkp.accessors import sourcefinder_image_from_accessor
 from tkp.accessors import FitsImage
 
@@ -147,6 +148,9 @@ def iterative_clean(obs,
                     casa_output_dir,
                     fits_output_dir,
                     casa_instance):
+    """
+    (Otherwise known as 'Re-Clean')
+    """
     assert isinstance(obs, ObsInfo)
     assert isinstance(chimconfig, chimenea.config.ChimConfig)
     casa = casa_instance
@@ -173,10 +177,10 @@ def iterative_clean(obs,
 
         # Get new estimate of RMS for each map:
         logger.debug("Re-estimating RMS...")
-        if not mask:
-            map = obs.maps_open.ms.residual
-        else:
+        if mask:
             map = obs.maps_masked.ms.residual
+        else:
+            map = obs.maps_open.ms.residual
         new_rms = get_image_rms_estimate(map)
         obs.rms_delta = (obs.rms_best - new_rms ) / obs.rms_best
         logger.debug("%s; RMS est, old: %s, new:%s, delta:%s",
@@ -186,3 +190,22 @@ def iterative_clean(obs,
             logger.warn("%s RMS *increased* after clean, delta: %s",
                         obs.name, obs.rms_delta)
     return
+
+def apply_primary_beam_correction(obs,
+                                 chimconfig,
+                                 casa_script):
+
+    pbcor.apply_pb_correction(obs,
+                              chimconfig.pb_curve,
+                              chimconfig.pb_cutoff)
+
+    for cleanmaps in (obs.maps_open, obs.maps_masked):
+        cleanmaps.fits.pbcor = cleanmaps.fits.image.rsplit('.',1)[0]+'.pbcor.fits'
+        logger.debug('Exporting PBcor fits to {}'.format(cleanmaps.fits.pbcor))
+        drivecasa.commands.export_fits(
+            casa_script,
+            image_path=cleanmaps.ms.pbcor,
+            out_path=cleanmaps.fits.pbcor,
+            overwrite=True)
+
+
