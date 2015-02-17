@@ -76,10 +76,9 @@ def process_observation_group(obs_list,
     logger.info("Generated mask:\n" + mask)
 
 
-
-    logger.info("*** Running masked clean on each epoch ***")
     # Assuming mask valid, i.e. not an empty field:
     if len(mask_apertures):
+        logger.info("*** Running masked clean on each epoch ***")
         # Reset the concat_ob best rms estimate to that of dirty map,
         # to avoid over-cleaning.
         concat_ob.rms_best = concat_ob.rms_dirty

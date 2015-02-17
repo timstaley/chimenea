@@ -200,12 +200,15 @@ def apply_primary_beam_correction(obs,
                               chimconfig.pb_cutoff)
 
     for cleanmaps in (obs.maps_open, obs.maps_masked):
-        cleanmaps.fits.pbcor = cleanmaps.fits.image.rsplit('.',1)[0]+'.pbcor.fits'
-        logger.debug('Exporting PBcor fits to {}'.format(cleanmaps.fits.pbcor))
-        drivecasa.commands.export_fits(
-            casa_script,
-            image_path=cleanmaps.ms.pbcor,
-            out_path=cleanmaps.fits.pbcor,
-            overwrite=True)
+        #Won't always have a masked-clean image, sometimes no sources to mask.
+        if cleanmaps.fits.image:
+            fits_image_pathstem = cleanmaps.fits.image.rsplit('.',1)[0]
+            cleanmaps.fits.pbcor = fits_image_pathstem +'.pbcor.fits'
+            logger.debug('Exporting PBcor fits to {}'.format(cleanmaps.fits.pbcor))
+            drivecasa.commands.export_fits(
+                casa_script,
+                image_path=cleanmaps.ms.pbcor,
+                out_path=cleanmaps.fits.pbcor,
+                overwrite=True)
 
 
