@@ -40,7 +40,10 @@ class ObsInfo(object):
 
     def __init__(self, name, group, metadata, uvfits=None):
         #Typically contains the metadata from a processed AMI rawfile:
-        self.meta = metadata
+        if metadata is None:
+            self.meta={}
+        else:
+            self.meta = metadata
         self.name = name
         self.group = group
         self.uv_fits = uvfits
@@ -51,13 +54,25 @@ class ObsInfo(object):
         self.rms_dirty=None
         self.rms_best=None
         self.rms_delta=None
+        self.rms_history = []
 
     def __repr__(self):
+        """
+        Prettyprint (whitespace, indent) when repr / str is called.
+        """
         return json.dumps(self, cls=ObsInfo.Encoder, indent=4, sort_keys=True)
+
 
     magic_key = '__class__'
 
     class Encoder(json.JSONEncoder):
+        """
+        Allows encoding to JSON.
+
+        Since this is basically a dumb struct, we can trivially serialize it in
+        JSON format - we just dump the object __dict__ with an extra key
+        noting which class it is, to allow for de-serialization.
+        """
         def default(self,obj):
             for obj_class in serializable:
                 if isinstance(obj, obj_class):
@@ -68,6 +83,9 @@ class ObsInfo(object):
 
 
     class Decoder(json.JSONDecoder):
+        """
+        Allows decoding from JSON representation supplied by Encoder.
+        """
         def __init__(self, **kwargs):
             # super(ObsInfo.Decoder, self).__init__(object_hook=self.as_obsinfo,
             #                                       **kwargs)

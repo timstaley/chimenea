@@ -4,6 +4,7 @@ import os
 import chimenea
 from chimenea import utils
 import chimenea.subroutines as subs
+from tkp.accessors.detection import casa_detect
 import logging
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,9 @@ def process_observation_group(obs_list,
     logger.info("*** Getting initial estimates of RMS from dirty maps ***")
     for obs in obs_list+[concat_ob]:
         dmap = obs.maps_dirty.ms.image
-        obs.rms_dirty= subs.get_image_rms_estimate(dmap)
+        obs.rms_dirty_naive= subs.get_naive_image_rms_estimate(dmap)
+        obs.rms_dirty= subs.get_correlated_image_rms_estimate(dmap)
+        obs.rms_history.append(obs.rms_dirty)
         obs.rms_best = obs.rms_dirty
         logger.debug("%s; dirty map RMS est: %s", obs.name, obs.rms_dirty)
 
@@ -67,7 +70,7 @@ def process_observation_group(obs_list,
         f.write(utils.fk5_ellipse_regions_from_extractedsources(sources))
 
     #Use it to determine mask:
-    mask, mask_apertures = utils.generate_mask(
+    mask, mask_apertures, mask_sources = utils.generate_mask(
         chimconfig,
         extracted_sources=sources,
         monitoring_coords=monitor_coords,
@@ -90,6 +93,9 @@ def process_observation_group(obs_list,
                                  casa_output_dir=casa_output_dir,
                                  fits_output_dir=fits_output_dir,
                                  casa_instance=casa_instance)
+            if mask_sources:
+                obs.meta['masked_sources'] = [s.serialize(0,0)
+                                              for s in mask_sources]
 
     logger.info("*** Running open clean on each epoch ***")
     # Finally, run a single open-clean on each epoch, to the RMS limit

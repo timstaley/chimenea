@@ -15,6 +15,8 @@ import chimenea.config
 import chimenea.pbcor as pbcor
 from tkp.accessors import sourcefinder_image_from_accessor
 from tkp.accessors import FitsImage
+from tkp.accessors.detection import casa_detect
+from tkp.sourcefinder.stats import sigma_clip
 
 logger = logging.getLogger(__name__)
 
@@ -138,9 +140,36 @@ def run_sourcefinder(path_to_fits_image,
                             force_beam=sfconf.force_beam)
     return results
 
-def get_image_rms_estimate(path_to_casa_image):
+
+def get_naive_image_rms_estimate(path_to_casa_image):
     map = utils.load_casa_imagedata(path_to_casa_image)
     return chimenea.sigmaclip.rms_with_clipped_subregion(map, sigma=3, f=3)
+
+
+def load_beam_from_image(path_to_casa_image):
+    accessor_class = casa_detect(path_to_casa_image)
+    accessor = accessor_class(path_to_casa_image)
+    return accessor.beam
+
+def get_correlated_image_rms_estimate(path_to_casa_image,
+                                      beam_in_pix=None):
+
+    if beam_in_pix is None:
+        beam_in_pix = load_beam_from_image(path_to_casa_image)
+
+    # Might not be able to use TKP accessor if loading from residuals table ---
+    #  no beam information breaks the accessor! (quite reasonably so.)
+    map = utils.load_casa_imagedata(path_to_casa_image)
+
+    _, unbiased_std, centre, nits = sigma_clip(map.ravel(), beam_in_pix)
+    logger.debug("Est. unbiased SD of {} at {:.3e} (med {:.2e})".format(
+        os.path.basename(path_to_casa_image),
+        unbiased_std,
+        centre
+    ))
+    
+    return unbiased_std
+
 
 def iterative_clean(obs,
                     chimconfig,
@@ -179,9 +208,13 @@ def iterative_clean(obs,
         logger.debug("Re-estimating RMS...")
         if mask:
             map = obs.maps_masked.ms.residual
+            beam = load_beam_from_image(obs.maps_masked.ms.image)
         else:
             map = obs.maps_open.ms.residual
-        new_rms = get_image_rms_estimate(map)
+            beam = load_beam_from_image(obs.maps_open.ms.image)
+        new_rms = get_correlated_image_rms_estimate(map,
+                                                    beam)
+        obs.rms_history.append(new_rms)
         obs.rms_delta = (obs.rms_best - new_rms ) / obs.rms_best
         logger.debug("%s; RMS est, old: %s, new:%s, delta:%s",
                      obs.name, obs.rms_best, new_rms, obs.rms_delta)

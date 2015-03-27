@@ -91,4 +91,4 @@ def generate_mask(chimconfig,
         mask_coords,
         aperture_radius=str(conf.mask_ap_radius_degrees) + "deg")
 
-    return mask, mask_apertures
+    return mask, mask_apertures, masked_sources
