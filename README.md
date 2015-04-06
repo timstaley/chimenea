@@ -20,4 +20,8 @@ be adapted to other telescopes. You may want to take a look at the
 package to see how it has been integrated into our project-specific data-flow.
 
 If you make use of chimenea in work leading to a publication, we ask that you
-cite the relevant ASCL entry and accompanying paper (forthcoming).
+cite the relevant [ASCL entry](http://ascl.net/1504.005) and accompanying paper 
+([Staley and Anderson](https://github.com/timstaley/automated-radio-imaging-paper), 
+in prep).
+
+
