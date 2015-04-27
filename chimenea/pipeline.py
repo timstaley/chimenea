@@ -31,6 +31,7 @@ def process_observation_group(obs_list,
             threshold=1,
             niter=0,
             mask='',
+            modelimage='',
             other_clean_args=chimconfig.clean.other_args))
 
     logger.info("*** Concatenating and making dirty maps ***")
@@ -99,9 +100,14 @@ def process_observation_group(obs_list,
 
     logger.info("*** Running open clean on each epoch ***")
     # Finally, run a single open-clean on each epoch, to the RMS limit
-    # determined from the masked clean.
+    # determined from the masked clean, initialized with the model from the
+    # masked clean.
     script=[]
     for obs in obs_list:
+        modelimage = ''
+        if len(mask_apertures):
+            modelimage = obs.maps_masked.ms.model
+
         script.extend(
             subs.clean_and_export_fits(
                 obs,
@@ -109,6 +115,7 @@ def process_observation_group(obs_list,
                 threshold=chimconfig.clean.sigma_threshold * obs.rms_best,
                 niter=chimconfig.clean.niter,
                 mask='',
+                modelimage=modelimage,
                 other_clean_args=chimconfig.clean.other_args
             ))
     casa_out, errors = casa_instance.run_script(script, raise_on_severe=True)

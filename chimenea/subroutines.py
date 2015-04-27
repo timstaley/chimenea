@@ -58,21 +58,24 @@ def clean_and_export_fits(obs_info,
                           threshold,
                           niter,
                           mask,
+                          modelimage,
                           other_clean_args):
     """
     Runs clean. Uses a little logic on the arguments to perform
     output-path determination magic.
 
-    **Args**:
+    Args:
+        obs_info: ObsInfo object
+        casa_output_dir, fits_output_dir: obvious
+        threshold: Clean threshold, in Janskys.
+        niter: Max number of iterations per Clean invocation, passed to
+            CASA-Clean.
+        mask: String representing the mask apertures, passed to CASA-Clean.
+        modelimage: Path to initial model (if any), passed to CASA-Clean.
 
-    - obs_info: ObsInfo object
-    - casa_output_dir, fits_output_dir: obvious
-    - threshold: Clean threshold, in Janskys.
-    - niter: Max number of iterations per Clean invocation, passed to CASA-Clean.
-    - mask: String representing the mask apertures, passed to CASA-Clean.
 
-
-    *Returns:* script
+    Returns:
+        script
     """
     assert isinstance(obs_info, ObsInfo)
     logger.debug('Scripting clean for %s, niter=%s, threshold=%sJy',
@@ -101,6 +104,7 @@ def clean_and_export_fits(obs_info,
                                     niter=niter,
                                     threshold_in_jy=threshold,
                                     mask=mask,
+                                    modelimage=modelimage,
                                     other_clean_args=other_clean_args,
                                     out_dir=maps_dir,
                                     overwrite=True)
@@ -200,6 +204,7 @@ def iterative_clean(obs,
                            threshold=obs.rms_best*chimconfig.clean.sigma_threshold,
                            niter=chimconfig.clean.niter,
                            mask=mask,
+                           modelimage='',
                            other_clean_args=chimconfig.clean.other_args
                             ))
         casa_out, errors = casa.run_script(script, raise_on_severe=True)

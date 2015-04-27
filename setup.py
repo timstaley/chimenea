@@ -3,14 +3,14 @@
 from setuptools import setup
 
 
-requirements = ['drive-casa>=0.6',
+requirements = ['drive-casa>=0.6.6',
                 'tkp>=2.0,<3',
 ]
 
 
 setup(
     name="chimenea",
-    version="0.3.0",
+    version="0.4.0dev",
     packages=['chimenea'],
     description="Automated image-synthesis of multi-epoch radio-telescope data.",
     author="Tim Staley",
