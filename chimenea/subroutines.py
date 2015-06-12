@@ -88,11 +88,16 @@ def clean_and_export_fits(obs_info,
         #Dirty map generation
         maps_dir =  os.path.join(casa_output_dir, 'dirty')
         msfits_attr = 'maps_dirty'
-    elif mask =='':
-        #Open Clean
+    elif mask == '' and modelimage == '':
+        # Open Clean
         maps_dir = os.path.join(casa_output_dir, 'open_clean')
         msfits_attr = 'maps_open'
         fits_basename = obs_info.name + '_open'
+    elif mask == '' and modelimage != '':
+        #Hybrid Clean
+        maps_dir = os.path.join(casa_output_dir, 'hybrid_clean')
+        msfits_attr = 'maps_hybrid'
+        fits_basename = obs_info.name + '_hybrid'
     else:
         #Masked clean
         maps_dir = os.path.join(casa_output_dir, 'masked_clean')
@@ -171,7 +176,7 @@ def get_correlated_image_rms_estimate(path_to_casa_image,
         unbiased_std,
         centre
     ))
-    
+
     return unbiased_std
 
 
@@ -237,7 +242,7 @@ def apply_primary_beam_correction(obs,
                               chimconfig.pb_curve,
                               chimconfig.pb_cutoff)
 
-    for cleanmaps in (obs.maps_open, obs.maps_masked):
+    for cleanmaps in (obs.maps_open, obs.maps_masked, obs.maps_hybrid):
         #Won't always have a masked-clean image, sometimes no sources to mask.
         if cleanmaps.fits.image:
             fits_image_pathstem = cleanmaps.fits.image.rsplit('.',1)[0]

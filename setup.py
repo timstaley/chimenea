@@ -10,7 +10,7 @@ requirements = ['drive-casa>=0.6.6',
 
 setup(
     name="chimenea",
-    version="0.4.0",
+    version="0.5.0",
     packages=['chimenea'],
     description="Automated image-synthesis of multi-epoch radio-telescope data.",
     author="Tim Staley",

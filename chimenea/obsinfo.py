@@ -51,6 +51,9 @@ class ObsInfo(object):
         self.maps_dirty = MsFits()
         self.maps_open = MsFits()
         self.maps_masked = MsFits()
+        # For maps that take a model from a masked clean,
+        # then apply a final additional open-clean
+        self.maps_hybrid = MsFits()
         self.rms_dirty=None
         self.rms_best=None
         self.rms_delta=None

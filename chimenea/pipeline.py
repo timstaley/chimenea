@@ -100,13 +100,26 @@ def process_observation_group(obs_list,
 
     logger.info("*** Running open clean on each epoch ***")
     # Finally, run a single open-clean on each epoch, to the RMS limit
-    # determined from the masked clean, initialized with the model from the
-    # masked clean.
+    # determined from the masked clean.
+    # If we ran a masked clean, then also create a 'hybrid' image,
+    # initialized with the model from the masked clean,
+    # then open-cleaned in addition.
     script=[]
     for obs in obs_list:
         modelimage = ''
         if len(mask_apertures):
             modelimage = obs.maps_masked.ms.model
+
+        script.extend(
+            subs.clean_and_export_fits(
+                obs,
+                casa_output_dir, fits_output_dir,
+                threshold=chimconfig.clean.sigma_threshold * obs.rms_best,
+                niter=chimconfig.clean.niter,
+                mask='',
+                modelimage='',
+                other_clean_args=chimconfig.clean.other_args
+            ))
 
         script.extend(
             subs.clean_and_export_fits(

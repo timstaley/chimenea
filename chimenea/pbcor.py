@@ -130,3 +130,5 @@ def apply_pb_correction(obs,
         process_clean_maps(obs.maps_masked.ms)
     if obs.maps_open.ms.image:
         process_clean_maps(obs.maps_open.ms)
+    if obs.maps_hybrid.ms.image:
+        process_clean_maps(obs.maps_hybrid.ms)
