@@ -24,4 +24,14 @@ cite the relevant [ASCL entry](http://ascl.net/1504.005) and accompanying paper
 ([Staley and Anderson](https://github.com/timstaley/automated-radio-imaging-paper), 
 in prep).
 
+<p align="center">
+<img src="https://farm4.staticflickr.com/3911/15133658106_43fa972324_k.jpg" width="427" height="640" alt="Galactic Chimney">
+</p> 
+<p align="center">
+<em>Casa, chimenea, estrellas. </em>
+</p> 
+(Image credit: [Jonas Wagner](https://www.flickr.com/photos/80225884@N06/), CC BY-NC-SA 2.0)
+
+
+
 
