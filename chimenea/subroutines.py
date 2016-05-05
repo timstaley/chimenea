@@ -34,10 +34,11 @@ def import_and_concatenate(obs_list, casa_output_dir):
     script = []
     for obs in obs_list:
         assert isinstance(obs, ObsInfo)
-        obs.uv_ms = drivecasa.commands.import_uvfits(script,
-                                             obs.uv_fits,
-                                             out_dir=casa_output_dir,
-                                             overwrite=True)
+        if not obs.uv_ms:
+            obs.uv_ms = drivecasa.commands.import_uvfits(script,
+                                                 obs.uv_fits,
+                                                 out_dir=casa_output_dir,
+                                                 overwrite=True)
 
 
     # Concatenate the data to create a master image:
@@ -105,7 +106,7 @@ def clean_and_export_fits(obs_info,
         fits_basename = obs_info.name + '_masked'
 
     maps = drivecasa.commands.clean(script,
-                                    vis_path=obs_info.uv_ms,
+                                    vis_paths=obs_info.uv_ms,
                                     niter=niter,
                                     threshold_in_jy=threshold,
                                     mask=mask,

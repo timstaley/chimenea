@@ -19,3 +19,7 @@ class TestObsInfoSerialization(TestCase):
         rep = json.dumps(self.obs, cls=ObsInfo.Encoder)
         obs2 = json.loads(rep, cls=ObsInfo.Decoder)
         # print obs2
+
+    def test_list_round_trip(self):
+        rep = json.dumps([self.obs], cls=ObsInfo.Encoder)
+        loaded_list = json.loads(rep, cls=ObsInfo.Decoder)

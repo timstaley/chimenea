@@ -3,10 +3,12 @@ Defines the ObsInfo class and its component members.
 """
 import json
 
+
 class CleanMaps(object):
     """
     Just a bag of attributes, representing data-products from Clean.
     """
+
     def __init__(self, image=None, model=None, residual=None, psf=None,
                  mask=None, flux=None, pbcor=None):
         self.image = image
@@ -17,10 +19,12 @@ class CleanMaps(object):
         self.flux = flux
         self.pbcor = pbcor
 
+
 class MsFits(object):
     """
     Attribute storing paths to MeasurementSet or FITS copy of clean maps.
     """
+
     def __init__(self):
         self.ms = CleanMaps()
         self.fits = CleanMaps()
@@ -37,26 +41,29 @@ class ObsInfo(object):
     neater code.
     """
 
-
-    def __init__(self, name, group, metadata, uvfits=None):
-        #Typically contains the metadata from a processed AMI rawfile:
+    def __init__(self, name, group,
+                 metadata=None,
+                 uvfits=None,
+                 uvms=None,
+                 ):
+        # Typically contains the metadata from a processed AMI rawfile:
         if metadata is None:
-            self.meta={}
+            self.meta = {}
         else:
             self.meta = metadata
         self.name = name
         self.group = group
         self.uv_fits = uvfits
-        self.uv_ms = None
+        self.uv_ms = uvms
         self.maps_dirty = MsFits()
         self.maps_open = MsFits()
         self.maps_masked = MsFits()
         # For maps that take a model from a masked clean,
         # then apply a final additional open-clean
         self.maps_hybrid = MsFits()
-        self.rms_dirty=None
-        self.rms_best=None
-        self.rms_delta=None
+        self.rms_dirty = None
+        self.rms_best = None
+        self.rms_delta = None
         self.rms_history = []
 
     def __repr__(self):
@@ -64,7 +71,6 @@ class ObsInfo(object):
         Prettyprint (whitespace, indent) when repr / str is called.
         """
         return json.dumps(self, cls=ObsInfo.Encoder, indent=4, sort_keys=True)
-
 
     magic_key = '__class__'
 
@@ -76,19 +82,20 @@ class ObsInfo(object):
         JSON format - we just dump the object __dict__ with an extra key
         noting which class it is, to allow for de-serialization.
         """
-        def default(self,obj):
+
+        def default(self, obj):
             for obj_class in serializable:
                 if isinstance(obj, obj_class):
                     serial_dict = obj.__dict__.copy()
-                    serial_dict[ObsInfo.magic_key] =  obj.__class__.__name__
+                    serial_dict[ObsInfo.magic_key] = obj.__class__.__name__
                     return serial_dict
-            return json.JSONEncoder.default(self,obj)
-
+            return json.JSONEncoder.default(self, obj)
 
     class Decoder(json.JSONDecoder):
         """
         Allows decoding from JSON representation supplied by Encoder.
         """
+
         def __init__(self, **kwargs):
             # super(ObsInfo.Decoder, self).__init__(object_hook=self.as_obsinfo,
             #                                       **kwargs)
@@ -109,11 +116,4 @@ class ObsInfo(object):
             return dct
 
 
-serializable = [ObsInfo, MsFits,CleanMaps]
-
-
-
-
-
-
-
+serializable = [ObsInfo, MsFits, CleanMaps]
