@@ -34,8 +34,11 @@ def process_observation_group(obs_list,
             modelimage='',
             other_clean_args=chimconfig.clean.other_args))
 
+    # Concatenating many images can take a long time, so we extend the timeout
+    concat_timeout = casa_instance.child.timeout * len(obs_list)
     logger.info("*** Concatenating and making dirty maps ***")
-    casa_out, errors = casa_instance.run_script(script, raise_on_severe=True)
+    casa_out, errors = casa_instance.run_script(script, raise_on_severe=True,
+                                                timeout=concat_timeout)
     if errors:
         logger.warning("Got the following errors (probably all ok)")
         for e in errors:
