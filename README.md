@@ -6,7 +6,7 @@ of multi-epoch radio-synthesis data, developed as part of the
 The key logic-flow is implemented in the 
 [pipeline.py](chimenea/pipeline.py) module. 
 For a full description, see the accompanying paper, 
-[Staley and Anderson (in prep)](https://github.com/timstaley/automated-radio-imaging-paper). 
+[Staley and Anderson (2015)](https://github.com/timstaley/automated-radio-imaging-paper). 
 
 The chimenea pipeline is built upon NRAO [CASA](http://casa.nrao.edu) 
 subroutines, interacting with the CASA environment via the 
@@ -21,8 +21,7 @@ package to see how it has been integrated into our project-specific data-flow.
 
 If you make use of chimenea in work leading to a publication, we ask that you
 cite the relevant [ASCL entry](http://ascl.net/1504.005) and accompanying paper 
-([Staley and Anderson](https://github.com/timstaley/automated-radio-imaging-paper), 
-in prep).
+([Staley and Anderson (2015)](https://github.com/timstaley/automated-radio-imaging-paper)).
 
 <p align="center">
 <img src="https://farm4.staticflickr.com/3911/15133658106_43fa972324_k.jpg" width="427" height="640" alt="Galactic Chimney">
